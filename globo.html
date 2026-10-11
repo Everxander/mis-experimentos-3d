@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Laboratorio 3D: Globo y Electricidad Estática</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- OrbitControls -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+            background-color: #080d1a;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+            touch-action: none;
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+    </style>
+</head>
+<body class="text-slate-100">
+
+    <div id="canvas-container"></div>
+
+    <!-- HUD Overlay -->
+    <div class="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 sm:p-6">
+        
+        <!-- Header & Telemetría -->
+        <div class="flex flex-wrap justify-between items-start gap-4">
+            <div class="glass-panel p-4 rounded-2xl pointer-events-auto max-w-xs shadow-2xl">
+                <div class="flex items-center gap-3">
+                    <div class="p-3 bg-indigo-500/20 border border-indigo-500/40 rounded-xl text-indigo-400">
+                        <i class="fa-solid fa-bolt text-2xl"></i>
+                    </div>
+                    <div>
+                        <h1 class="font-bold text-base sm:text-lg leading-tight text-white">Electricidad Estática</h1>
+                        <p class="text-xs text-slate-300">Fricción e Inducción de Carga</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Indicador de Carga Estática -->
+            <div class="glass-panel p-4 rounded-2xl pointer-events-auto flex items-center gap-4 sm:gap-6 shadow-2xl">
+                <div class="text-center">
+                    <p class="text-[10px] sm:text-xs font-semibold text-slate-400 uppercase">Carga del Globo</p>
+                    <p id="charge-display" class="text-sm sm:text-base font-bold text-cyan-400">0 %</p>
+                </div>
+                <div class="h-8 w-px bg-slate-700"></div>
+                <div class="text-center">
+                    <p class="text-[10px] sm:text-xs font-semibold text-slate-400 uppercase">Estado</p>
+                    <p id="status-display" class="text-xs font-bold text-amber-300 bg-amber-950/60 border border-amber-500/30 px-2.5 py-1 rounded-lg">Sin Carga (Frota el Suéter)</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Instrucciones y Controles -->
+        <div class="flex justify-between items-end">
+            <div class="hidden md:block glass-panel p-4 rounded-2xl pointer-events-auto max-w-xs shadow-2xl">
+                <p class="text-xs font-bold text-slate-300 uppercase mb-2">Instrucciones</p>
+                <p class="text-xs font-mono text-slate-400 leading-relaxed">
+                    1. Toma el globo y frota rápido sobre el suéter para cargarlo (-).<br>
+                    2. Acércalo a los papeles para ver cómo se pegan a la superficie exterior.
+                </p>
+            </div>
+
+            <div class="glass-panel p-5 rounded-2xl pointer-events-auto w-full md:w-80 shadow-2xl space-y-3">
+                <button id="btn-reset-charge" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2.5 px-3 rounded-xl text-xs transition flex items-center justify-center gap-1.5 active:scale-95 shadow-lg shadow-indigo-600/30">
+                    <i class="fa-solid fa-arrows-rotate"></i> Descargar Globo (Reset)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let scene, camera, renderer, controls;
+        let balloonMesh, sweaterMesh, canMesh;
+        let papers = [];
+        let raycaster, mouse, dragPlane;
+        let isDragging = false;
+        let chargeLevel = 0; // 0 a 100%
+        let lastBalloonPos = new THREE.Vector3();
+
+        const BALLOON_RADIUS_X = 0.8;
+        const BALLOON_RADIUS_Y = 0.96;
+
+        function init() {
+            const container = document.getElementById('canvas-container');
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x080d1a);
+            scene.fog = new THREE.FogExp2(0x080d1a, 0.02);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 3, 11);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            const OrbitControlsClass = THREE.OrbitControls || window.OrbitControls;
+            controls = new OrbitControlsClass(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+            const mainLight = new THREE.DirectionalLight(0xffffff, 1.2);
+            mainLight.position.set(6, 12, 8);
+            mainLight.castShadow = true;
+            scene.add(mainLight);
+
+            const dragPlaneGeo = new THREE.PlaneGeometry(300, 300);
+            const dragPlaneMat = new THREE.MeshBasicMaterial({ visible: false });
+            dragPlane = new THREE.Mesh(dragPlaneGeo, dragPlaneMat);
+            scene.add(dragPlane);
+
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            buildSceneObjects();
+            setupInteraction();
+
+            window.addEventListener('resize', onWindowResize);
+            animate();
+        }
+
+        function buildSceneObjects() {
+            // Mesa
+            const tableGeo = new THREE.CylinderGeometry(8, 8, 0.4, 64);
+            const tableMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4 });
+            const table = new THREE.Mesh(tableGeo, tableMat);
+            table.position.y = -2.2;
+            table.receiveShadow = true;
+            scene.add(table);
+
+            // Suéter de Lana
+            const sweaterGeo = new THREE.BoxGeometry(2.8, 0.2, 2.8);
+            const sweaterMat = new THREE.MeshStandardMaterial({ color: 0xb91c1c, roughness: 0.9 });
+            sweaterMesh = new THREE.Mesh(sweaterGeo, sweaterMat);
+            sweaterMesh.position.set(-3.2, -1.9, 0);
+            sweaterMesh.receiveShadow = true;
+            scene.add(sweaterMesh);
+
+            // Lata de aluminio
+            const canGeo = new THREE.CylinderGeometry(0.5, 0.5, 1.4, 24);
+            const canMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.8, roughness: 0.2 });
+            canMesh = new THREE.Mesh(canGeo, canMat);
+            canMesh.position.set(3.0, -1.3, 0);
+            canMesh.rotation.z = Math.PI / 2;
+            canMesh.castShadow = true;
+            scene.add(canMesh);
+
+            // Trozos de papel
+            const paperGeo = new THREE.BoxGeometry(0.2, 0.02, 0.2);
+            const paperMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.8 });
+            for (let i = 0; i < 25; i++) {
+                const paper = new THREE.Mesh(paperGeo, paperMat);
+                const origX = 0.2 + (Math.random() - 0.5) * 1.6;
+                const origZ = (Math.random() - 0.5) * 1.6;
+                paper.position.set(origX, -1.95, origZ);
+                
+                paper.userData = {
+                    isAttached: false,
+                    origPos: new THREE.Vector3(origX, -1.95, origZ),
+                    offsetOnBalloon: new THREE.Vector3(),
+                    rotationOffset: new THREE.Euler(
+                        Math.random() * Math.PI,
+                        Math.random() * Math.PI,
+                        Math.random() * Math.PI
+                    )
+                };
+                paper.castShadow = true;
+                scene.add(paper);
+                papers.push(paper);
+            }
+
+            // Globo Interactivo
+            const balloonGeo = new THREE.SphereGeometry(BALLOON_RADIUS_X, 32, 32);
+            balloonGeo.scale(1.0, 1.2, 1.0);
+            const balloonMat = new THREE.MeshStandardMaterial({
+                color: 0x0284c7,
+                roughness: 0.3,
+                metalness: 0.1
+            });
+            balloonMesh = new THREE.Mesh(balloonGeo, balloonMat);
+            balloonMesh.position.set(0, 0, 1);
+            balloonMesh.castShadow = true;
+            scene.add(balloonMesh);
+
+            lastBalloonPos.copy(balloonMesh.position);
+        }
+
+        function setupInteraction() {
+            const canvas = renderer.domElement;
+
+            function updateMouse(e) {
+                const rect = canvas.getBoundingClientRect();
+                mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            }
+
+            canvas.addEventListener('pointerdown', (e) => {
+                updateMouse(e);
+                raycaster.setFromCamera(mouse, camera);
+                const hits = raycaster.intersectObject(balloonMesh);
+                if (hits.length > 0) {
+                    isDragging = true;
+                    controls.enabled = false;
+                    dragPlane.position.copy(balloonMesh.position);
+                    dragPlane.quaternion.copy(camera.quaternion);
+                }
+            });
+
+            canvas.addEventListener('pointermove', (e) => {
+                if (!isDragging) return;
+                updateMouse(e);
+                raycaster.setFromCamera(mouse, camera);
+                const hits = raycaster.intersectObject(dragPlane);
+                if (hits.length > 0) {
+                    const targetPos = hits[0].point;
+                    
+                    targetPos.x = Math.max(-6, Math.min(6, targetPos.x));
+                    targetPos.y = Math.max(-1.5, Math.min(5, targetPos.y));
+                    targetPos.z = Math.max(-4, Math.min(4, targetPos.z));
+
+                    // Detección de fricción
+                    const distToSweater = targetPos.distanceTo(sweaterMesh.position);
+                    if (distToSweater < 1.8) {
+                        const movement = targetPos.distanceTo(lastBalloonPos);
+                        if (movement > 0.02) {
+                            chargeLevel = Math.min(100, chargeLevel + movement * 15);
+                            updateTelemetryUI();
+                        }
+                    }
+
+                    balloonMesh.position.copy(targetPos);
+                    lastBalloonPos.copy(targetPos);
+                }
+            });
+
+            const stopDrag = () => {
+                isDragging = false;
+                controls.enabled = true;
+            };
+
+            canvas.addEventListener('pointerup', stopDrag);
+            canvas.addEventListener('pointercancel', stopDrag);
+
+            document.getElementById('btn-reset-charge').onclick = () => {
+                chargeLevel = 0;
+                updateTelemetryUI();
+                papers.forEach(p => {
+                    p.userData.isAttached = false;
+                });
+            };
+        }
+
+        function updateElectrostastics() {
+            const bPos = balloonMesh.position;
+            const forceRatio = chargeLevel / 100;
+
+            // 1. Pegar trozos de papel en la superficie exterior
+            papers.forEach(paper => {
+                const distToCenter = paper.position.distanceTo(bPos);
+
+                if (chargeLevel > 5 && !paper.userData.isAttached && distToCenter < 2.2 * forceRatio) {
+                    // Calcular punto en la superficie exterior
+                    const dir = new THREE.Vector3().subVectors(paper.position, bPos).normalize();
+                    if (dir.length() === 0) dir.set(0, -1, 0);
+
+                    // Offset relativo a la superficie
+                    paper.userData.offsetOnBalloon.copy(dir).multiplyScalar(BALLOON_RADIUS_X + 0.05);
+                    paper.userData.isAttached = true;
+                }
+
+                if (paper.userData.isAttached) {
+                    if (chargeLevel <= 5) {
+                        paper.userData.isAttached = false;
+                    } else {
+                        // Mover junto a la superficie exterior del globo
+                        const targetPos = new THREE.Vector3().addVectors(bPos, paper.userData.offsetOnBalloon);
+                        paper.position.lerp(targetPos, 0.2);
+                        paper.rotation.copy(paper.userData.rotationOffset);
+                    }
+                } else {
+                    // Gravedad si no está pegado
+                    if (paper.position.y > paper.userData.origPos.y) {
+                        paper.position.y -= 0.06;
+                        paper.position.x += (paper.userData.origPos.x - paper.position.x) * 0.05;
+                        paper.position.z += (paper.userData.origPos.z - paper.position.z) * 0.05;
+                    } else {
+                        paper.position.copy(paper.userData.origPos);
+                    }
+                }
+            });
+
+            // 2. Rodar Lata
+            if (chargeLevel > 5) {
+                const distToCan = bPos.distanceTo(canMesh.position);
+                if (distToCan < 2.8 * forceRatio) {
+                    if (canMesh.position.x < bPos.x) {
+                        canMesh.position.x += 0.02 * forceRatio;
+                        canMesh.rotation.x += 0.05;
+                    } else if (canMesh.position.x > bPos.x) {
+                        canMesh.position.x -= 0.02 * forceRatio;
+                        canMesh.rotation.x -= 0.05;
+                    }
+                }
+            }
+        }
+
+        function updateTelemetryUI() {
+            const chargeDisp = document.getElementById('charge-display');
+            const statusDisp = document.getElementById('status-display');
+
+            const val = Math.round(chargeLevel);
+            chargeDisp.innerText = `${val} %`;
+
+            if (val > 70) {
+                statusDisp.innerText = '¡Carga Máxima Negativa (-)!';
+                statusDisp.className = 'text-xs font-bold text-emerald-300 bg-emerald-950/80 border border-emerald-500/50 px-2.5 py-1 rounded-lg animate-pulse';
+            } else if (val > 20) {
+                statusDisp.innerText = 'Cargado Electrostáticamente';
+                statusDisp.className = 'text-xs font-bold text-cyan-300 bg-cyan-950/60 border border-cyan-500/30 px-2.5 py-1 rounded-lg';
+            } else {
+                statusDisp.innerText = 'Sin Carga (Frota el Suéter)';
+                statusDisp.className = 'text-xs font-bold text-amber-300 bg-amber-950/60 border border-amber-500/30 px-2.5 py-1 rounded-lg';
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            updateElectrostastics();
+            renderer.render(scene, camera);
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>

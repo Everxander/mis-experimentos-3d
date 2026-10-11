@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Laboratorio 3D: Experimento Físico del Huevo Flotante</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Three.js Visual Engine -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Cannon.js Rigid Body Physics Engine -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+    <!-- OrbitControls for Three.js -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+            background-color: #080d1a;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+            touch-action: none;
+        }
+        #canvas-container canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+            cursor: grab;
+            outline: none;
+        }
+        body.dragging, body.dragging * {
+            cursor: grabbing !important;
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .cursor-grab {
+            cursor: grab !important;
+        }
+        .cursor-grabbing {
+            cursor: grabbing !important;
+        }
+    </style>
+</head>
+<body class="text-slate-100">
+
+    <!-- 3D Canvas Rendering Container -->
+    <div id="canvas-container"></div>
+
+    <!-- HUD Overlay & Scientific Telemetry -->
+    <div class="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 sm:p-6">
+        
+        <!-- Top Bar: Title & Scientific Telemetry -->
+        <div class="flex flex-wrap justify-between items-start gap-4">
+            <!-- Header Title Box -->
+            <div class="glass-panel p-4 rounded-2xl pointer-events-auto max-w-xs sm:max-w-sm shadow-2xl">
+                <div class="flex items-center gap-3">
+                    <div class="p-3 bg-amber-500/20 border border-amber-500/40 rounded-xl text-amber-400">
+                        <i class="fa-solid fa-flask text-2xl"></i>
+                    </div>
+                    <div>
+                        <h1 class="font-bold text-base sm:text-lg leading-tight text-white">Huevo Flotante 3D</h1>
+                        <p class="text-xs text-slate-300">Simulación Física de Arquímedes</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Real-Time Physical Density Gauges -->
+            <div class="glass-panel p-4 rounded-2xl pointer-events-auto flex items-center gap-4 sm:gap-6 shadow-2xl">
+                <div class="text-center">
+                    <p class="text-[10px] sm:text-xs font-semibold text-slate-400 uppercase tracking-wider">Densidad Agua</p>
+                    <p id="water-density-display" class="text-sm sm:text-base font-bold text-cyan-400">1000 <span class="text-xs text-slate-300">kg/m³</span></p>
+                </div>
+                <div class="h-8 w-px bg-slate-700"></div>
+                <div class="text-center">
+                    <p class="text-[10px] sm:text-xs font-semibold text-slate-400 uppercase tracking-wider">Densidad Huevo</p>
+                    <p id="egg-density-display" class="text-sm sm:text-base font-bold text-amber-400">1060 <span class="text-xs text-slate-300">kg/m³</span></p>
+                </div>
+                <div class="h-8 w-px bg-slate-700"></div>
+                <div class="text-center">
+                    <p class="text-[10px] sm:text-xs font-semibold text-slate-400 uppercase tracking-wider">Estado Físico</p>
+                    <p id="status-display" class="text-xs font-bold text-amber-300 bg-amber-950/60 border border-amber-500/30 px-2.5 py-1 rounded-lg">En la Mesa</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Controls: Salt Concentration Only -->
+        <div class="flex justify-between items-end">
+            <!-- Force Balance Readout -->
+            <div class="hidden md:block glass-panel p-4 rounded-2xl pointer-events-auto max-w-xs shadow-2xl">
+                <p class="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">Balance de Fuerzas (Eje Y)</p>
+                <div class="space-y-1.5 text-xs font-mono">
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">Fuerza Peso (Gravity):</span>
+                        <span id="weight-force-display" class="text-rose-400 font-bold">4.41 N</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">Empuje (Arquímedes):</span>
+                        <span id="buoyant-force-display" class="text-emerald-400 font-bold">0.00 N</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Salt Control Box -->
+            <div class="glass-panel p-5 rounded-2xl pointer-events-auto w-full md:w-80 shadow-2xl space-y-4">
+                <div class="flex justify-between items-center">
+                    <label for="salt-slider" class="font-bold text-xs text-white flex items-center gap-2 uppercase tracking-wide">
+                        <i class="fa-solid fa-cubes-stacked text-indigo-400"></i>
+                        Concentración de Sal
+                    </label>
+                    <span id="salt-percentage" class="text-xs font-bold text-indigo-300 bg-indigo-950/80 border border-indigo-500/40 px-2.5 py-0.5 rounded-lg">0% Sal</span>
+                </div>
+
+                <input type="range" id="salt-slider" min="0" max="100" value="0" step="1"
+                    class="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500">
+
+                <div class="grid grid-cols-2 gap-2">
+                    <button id="btn-add-salt" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2.5 px-3 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-lg shadow-indigo-600/30 active:scale-95">
+                        <i class="fa-solid fa-plus text-xs"></i> + Agregar Sal
+                    </button>
+                    <button id="btn-reset-water" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold py-2.5 px-3 rounded-xl text-xs transition flex items-center justify-center gap-1.5 active:scale-95">
+                        <i class="fa-solid fa-droplet-slash text-xs"></i> Agua Dulce
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Logic Script -->
+    <script>
+        // Core Engine References
+        let scene, camera, renderer, controls;
+        let world, eggBody, mouseBody, mouseConstraint;
+        let eggMesh, waterMesh, beakerGroup, saltParticlesGroup;
+        let raycaster, mouse;
+
+        // Interaction State Variables
+        let isDragging = false;
+        let isHovered = false;
+        let dragPlane;
+
+        // Physics Constants & Scientific Parameters
+        const GRAVITY = 9.81; // m/s^2
+        const EGG_RADIUS = 0.75; // Scene meters
+        const EGG_HEIGHT_SCALE = 1.35;
+        const EGG_VOLUME = (4 / 3) * Math.PI * Math.pow(EGG_RADIUS, 3) * 1.15; // ~2.26 units^3
+        const EGG_DENSITY = 1060; // kg/m^3
+        const EGG_MASS = (EGG_DENSITY * EGG_VOLUME) / 1000; // ~2.4 kg in simulation scale
+
+        const BEAKER_RADIUS = 2.2;
+        const BEAKER_HEIGHT = 6.4;
+        const WATER_HEIGHT = 5.2;
+        const WATER_SURFACE_Y = -3.1 + WATER_HEIGHT; // ~ 2.1 in world units
+        const WATER_BOTTOM_Y = -3.0;
+
+        let saltPercentage = 0;
+        let waterDensity = 1000; // Fresh water = 1000 kg/m^3, Full salt = 1200 kg/m^3
+        let currentBuoyancyForce = 0;
+
+        const TABLE_EGG_START_POS = { x: -4.5, y: -2.1, z: 0.6 };
+
+        function initScene() {
+            const container = document.getElementById('canvas-container');
+
+            // Three.js Scene Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x080d1a);
+            scene.fog = new THREE.FogExp2(0x080d1a, 0.02);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 3.8, 13.5);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            container.appendChild(renderer.domElement);
+
+            // Orbit Controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxPolarAngle = Math.PI / 2 + 0.02;
+            controls.minDistance = 6;
+            controls.maxDistance = 22;
+            controls.target.set(0, 0, 0);
+
+            // Lighting Setup
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+            scene.add(ambientLight);
+
+            const mainLight = new THREE.DirectionalLight(0xffffff, 1.25);
+            mainLight.position.set(8, 15, 8);
+            mainLight.castShadow = true;
+            mainLight.shadow.mapSize.width = 2048;
+            mainLight.shadow.mapSize.height = 2048;
+            scene.add(mainLight);
+
+            const rimLight = new THREE.DirectionalLight(0x38bdf8, 0.8);
+            rimLight.position.set(-8, 8, -8);
+            scene.add(rimLight);
+
+            // Camera-facing Invisible Drag Plane for 3D Raycasting
+            const dragPlaneGeo = new THREE.PlaneGeometry(300, 300);
+            const dragPlaneMat = new THREE.MeshBasicMaterial({ visible: false });
+            dragPlane = new THREE.Mesh(dragPlaneGeo, dragPlaneMat);
+            scene.add(dragPlane);
+
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+        }
+
+        function initPhysicsWorld() {
+            world = new CANNON.World();
+            world.gravity.set(0, -GRAVITY, 0);
+            world.broadphase = new CANNON.NaiveBroadphase();
+            world.solver.iterations = 12;
+
+            // Physical Table Plane
+            const tableShape = new CANNON.Plane();
+            const tableBody = new CANNON.Body({ mass: 0 });
+            tableBody.addShape(tableShape);
+            tableBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+            tableBody.position.set(0, -3.2, 0);
+            world.addBody(tableBody);
+
+            // Kinematic Anchor Body for Mouse Constraint Dragging
+            mouseBody = new CANNON.Body({ mass: 0 });
+            mouseBody.collisionFilterGroup = 0;
+            mouseBody.collisionFilterMask = 0;
+            world.addBody(mouseBody);
+
+            // Open Beaker Physical Bounds
+            const beakerBaseShape = new CANNON.Cylinder(BEAKER_RADIUS - 0.1, BEAKER_RADIUS - 0.1, 0.2, 16);
+            const beakerBaseBody = new CANNON.Body({ mass: 0 });
+            beakerBaseBody.addShape(beakerBaseShape);
+            beakerBaseBody.position.set(0, -3.1, 0);
+            world.addBody(beakerBaseBody);
+
+            const numPillars = 12;
+            for (let i = 0; i < numPillars; i++) {
+                const angle = (i / numPillars) * Math.PI * 2;
+                const wallPillar = new CANNON.Body({ mass: 0 });
+                const pillarShape = new CANNON.Cylinder(0.12, 0.12, BEAKER_HEIGHT, 8);
+                wallPillar.addShape(pillarShape);
+                const px = Math.cos(angle) * (BEAKER_RADIUS - 0.05);
+                const pz = Math.sin(angle) * (BEAKER_RADIUS - 0.05);
+                wallPillar.position.set(px, 0.1, pz);
+                world.addBody(wallPillar);
+            }
+        }
+
+        function build3DObjects() {
+            // Laboratory Table
+            const tableGeo = new THREE.CylinderGeometry(15, 15, 0.4, 64);
+            const tableMat = new THREE.MeshStandardMaterial({
+                color: 0x1e293b,
+                roughness: 0.35,
+                metalness: 0.2
+            });
+            const tableMesh = new THREE.Mesh(tableGeo, tableMat);
+            tableMesh.position.y = -3.4;
+            tableMesh.receiveShadow = true;
+            scene.add(tableMesh);
+
+            // Glass Beaker Visual Group
+            beakerGroup = new THREE.Group();
+            const glassMat = new THREE.MeshPhysicalMaterial({
+                color: 0xffffff,
+                transparent: true,
+                opacity: 0.28,
+                roughness: 0.05,
+                metalness: 0.1,
+                transmission: 0.92,
+                ior: 1.5,
+                thickness: 0.3,
+                side: THREE.DoubleSide
+            });
+
+            const beakerGeo = new THREE.CylinderGeometry(BEAKER_RADIUS, BEAKER_RADIUS, BEAKER_HEIGHT, 48, 1, true);
+            const beakerMesh = new THREE.Mesh(beakerGeo, glassMat);
+            beakerMesh.position.y = 0.1;
+            beakerMesh.castShadow = true;
+            beakerGroup.add(beakerMesh);
+
+            const rimGeo = new THREE.TorusGeometry(BEAKER_RADIUS, 0.07, 16, 64);
+            const rimMesh = new THREE.Mesh(rimGeo, glassMat);
+            rimMesh.rotation.x = Math.PI / 2;
+            rimMesh.position.y = 0.1 + BEAKER_HEIGHT / 2;
+            beakerGroup.add(rimMesh);
+
+            const baseGeo = new THREE.CylinderGeometry(BEAKER_RADIUS, BEAKER_RADIUS, 0.12, 48);
+            const baseMesh = new THREE.Mesh(baseGeo, glassMat);
+            baseMesh.position.y = 0.1 - BEAKER_HEIGHT / 2;
+            beakerGroup.add(baseMesh);
+
+            scene.add(beakerGroup);
+
+            // Water Fluid Body
+            const waterRadius = BEAKER_RADIUS - 0.08;
+            const waterGeo = new THREE.CylinderGeometry(waterRadius, waterRadius, WATER_HEIGHT, 48);
+            const waterMat = new THREE.MeshPhysicalMaterial({
+                color: 0x38bdf8,
+                transparent: true,
+                opacity: 0.48,
+                roughness: 0.08,
+                transmission: 0.72,
+                ior: 1.333
+            });
+            waterMesh = new THREE.Mesh(waterGeo, waterMat);
+            waterMesh.position.set(0, -3.1 + WATER_HEIGHT / 2, 0);
+            scene.add(waterMesh);
+
+            // Salt Particles Container
+            saltParticlesGroup = new THREE.Group();
+            scene.add(saltParticlesGroup);
+
+            // Egg Visual Geometry & Deformed Ovoid Mesh
+            const eggGeo = new THREE.SphereGeometry(EGG_RADIUS, 32, 32);
+            const posAttr = eggGeo.attributes.position;
+            for (let i = 0; i < posAttr.count; i++) {
+                let y = posAttr.getY(i);
+                if (y > 0) posAttr.setY(i, y * EGG_HEIGHT_SCALE);
+            }
+            eggGeo.computeVertexNormals();
+
+            const eggMat = new THREE.MeshStandardMaterial({
+                color: 0xfde68a,
+                roughness: 0.45,
+                metalness: 0.05
+            });
+            eggMesh = new THREE.Mesh(eggGeo, eggMat);
+            eggMesh.castShadow = true;
+            eggMesh.receiveShadow = true;
+            scene.add(eggMesh);
+
+            // Egg Physical Body
+            const eggShape = new CANNON.Sphere(EGG_RADIUS * 0.98);
+            eggBody = new CANNON.Body({
+                mass: EGG_MASS,
+                linearDamping: 0.1,
+                angularDamping: 0.2
+            });
+            eggBody.addShape(eggShape);
+            eggBody.position.set(TABLE_EGG_START_POS.x, TABLE_EGG_START_POS.y, TABLE_EGG_START_POS.z);
+            world.addBody(eggBody);
+
+            eggMesh.position.copy(eggBody.position);
+        }
+
+        function calculateAndApplyHydrodynamics() {
+            if (!eggBody) return;
+
+            const eggPos = eggBody.position;
+            const distFromCenter = Math.sqrt(eggPos.x * eggPos.x + eggPos.z * eggPos.z);
+            const insideBeakerRadius = distFromCenter < (BEAKER_RADIUS - 0.1);
+
+            const eggBottomY = eggPos.y - (EGG_RADIUS * EGG_HEIGHT_SCALE);
+            const eggTopY = eggPos.y + (EGG_RADIUS * EGG_HEIGHT_SCALE);
+
+            if (insideBeakerRadius && eggBottomY < WATER_SURFACE_Y && eggTopY > WATER_BOTTOM_Y) {
+                const totalHeight = eggTopY - eggBottomY;
+                const submergedHeight = Math.max(0, Math.min(totalHeight, WATER_SURFACE_Y - eggBottomY));
+                const submergedRatio = Math.max(0, Math.min(1, submergedHeight / totalHeight));
+
+                const eggWeight = EGG_MASS * GRAVITY;
+                const buoyantForceMagnitude = eggWeight * (waterDensity / EGG_DENSITY) * submergedRatio;
+
+                currentBuoyancyForce = buoyantForceMagnitude;
+
+                const buoyantForceVector = new CANNON.Vec3(0, buoyantForceMagnitude, 0);
+                eggBody.applyForce(buoyantForceVector, eggBody.position);
+
+                const linearVelocity = eggBody.velocity;
+                const dampingFactor = 0.06 * submergedRatio * (waterDensity / 1000);
+
+                eggBody.velocity.x -= linearVelocity.x * dampingFactor;
+                eggBody.velocity.y -= linearVelocity.y * dampingFactor;
+                eggBody.velocity.z -= linearVelocity.z * dampingFactor;
+
+                eggBody.angularVelocity.scale(0.92, eggBody.angularVelocity);
+            } else {
+                currentBuoyancyForce = 0;
+            }
+        }
+
+        function setupPointerControls() {
+            const canvas = renderer.domElement;
+            canvas.style.touchAction = "none";
+            canvas.style.cursor = "grab";
+
+            let activePointerId = null;
+            let dragOffset = new THREE.Vector3();
+
+            function updatePointerPosition(e) {
+                const rect = canvas.getBoundingClientRect();
+                mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            }
+
+            function getPlanePoint(e) {
+                updatePointerPosition(e);
+                raycaster.setFromCamera(mouse, camera);
+                const hits = raycaster.intersectObject(dragPlane, false);
+                return hits.length ? hits[0].point : null;
+            }
+
+            function onPointerDown(e) {
+                if (e.pointerType === "mouse" && e.button !== 0) return;
+                if (isDragging) return;
+
+                updatePointerPosition(e);
+                raycaster.setFromCamera(mouse, camera);
+                const hits = raycaster.intersectObject(eggMesh, false);
+                if (!hits.length) return;
+
+                e.preventDefault();
+                activePointerId = e.pointerId;
+                isDragging = true;
+                controls.enabled = false;
+
+                dragPlane.position.copy(eggMesh.position);
+                dragPlane.quaternion.copy(camera.quaternion);
+                const planePoint = getPlanePoint(e);
+                if (planePoint) {
+                    dragOffset.copy(eggBody.position).sub(planePoint);
+                } else {
+                    dragOffset.set(0, 0, 0);
+                }
+
+                mouseBody.position.copy(eggBody.position);
+                const localPivot = new CANNON.Vec3(0, 0, 0);
+                mouseConstraint = new CANNON.PointToPointConstraint(
+                    eggBody, localPivot,
+                    mouseBody, new CANNON.Vec3(0, 0, 0),
+                    1e6
+                );
+                world.addConstraint(mouseConstraint);
+                eggBody.wakeUp();
+
+                try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+                eggMesh.material.color.setHex(0xfacc15);
+                document.body.classList.add("dragging");
+                document.body.classList.remove("cursor-grab");
+            }
+
+            function onPointerMove(e) {
+                if (isDragging && activePointerId !== e.pointerId) return;
+
+                updatePointerPosition(e);
+                raycaster.setFromCamera(mouse, camera);
+
+                if (isDragging && mouseConstraint) {
+                    e.preventDefault();
+                    dragPlane.quaternion.copy(camera.quaternion);
+                    const hits = raycaster.intersectObject(dragPlane, false);
+                    if (hits.length) {
+                        const target = hits[0].point.add(dragOffset);
+
+                        target.x = Math.max(-7.5, Math.min(7.5, target.x));
+                        target.y = Math.max(-3.0, Math.min(6.5, target.y));
+                        target.z = Math.max(-5.0, Math.min(5.0, target.z));
+
+                        mouseBody.position.set(target.x, target.y, target.z);
+                        mouseBody.velocity.set(0, 0, 0);
+                        mouseBody.wakeUp();
+                        eggBody.wakeUp();
+                    }
+                    return;
+                }
+
+                const hits = raycaster.intersectObject(eggMesh, false);
+                if (hits.length) {
+                    isHovered = true;
+                    canvas.style.cursor = "grab";
+                } else {
+                    isHovered = false;
+                    canvas.style.cursor = "default";
+                }
+            }
+
+            function releasePointer(e) {
+                if (!isDragging) return;
+                if (e && activePointerId !== null && e.pointerId !== undefined &&
+                    e.pointerId !== activePointerId) return;
+
+                isDragging = false;
+                activePointerId = null;
+
+                if (mouseConstraint) {
+                    world.removeConstraint(mouseConstraint);
+                    mouseConstraint = null;
+                }
+
+                controls.enabled = true;
+                document.body.classList.remove("dragging");
+                eggMesh.material.color.setHex(isHovered ? 0xfef08a : 0xfde68a);
+                canvas.style.cursor = isHovered ? "grab" : "default";
+
+                mouseBody.velocity.set(0, 0, 0);
+                eggBody.wakeUp();
+            }
+
+            canvas.addEventListener("pointerdown", onPointerDown);
+            canvas.addEventListener("pointermove", onPointerMove);
+            canvas.addEventListener("pointerup", releasePointer);
+            canvas.addEventListener("pointercancel", releasePointer);
+            canvas.addEventListener("lostpointercapture", releasePointer);
+            window.addEventListener("blur", releasePointer);
+            window.addEventListener("resize", onWindowResize);
+        }
+
+        function setupUIEventListeners() {
+            const slider = document.getElementById('salt-slider');
+            const saltText = document.getElementById('salt-percentage');
+            const waterDensityText = document.getElementById('water-density-display');
+
+            function updateSaltLevel(value) {
+                saltPercentage = parseInt(value);
+                slider.value = saltPercentage;
+                saltText.innerText = `${saltPercentage}% Sal`;
+
+                waterDensity = 1000 + (saltPercentage / 100) * 200;
+                waterDensityText.innerHTML = `${Math.round(waterDensity)} <span class="text-xs text-slate-300">kg/m³</span>`;
+
+                const saltTint = new THREE.Color(0x38bdf8).lerp(new THREE.Color(0xf0f9ff), saltPercentage / 100);
+                waterMesh.material.color = saltTint;
+                waterMesh.material.opacity = 0.48 + (saltPercentage / 100) * 0.18;
+
+                spawnSaltParticles();
+            }
+
+            slider.addEventListener('input', (e) => updateSaltLevel(e.target.value));
+
+            document.getElementById('btn-add-salt').addEventListener('click', () => {
+                updateSaltLevel(Math.min(100, saltPercentage + 25));
+            });
+
+            document.getElementById('btn-reset-water').addEventListener('click', () => {
+                updateSaltLevel(0);
+            });
+        }
+
+        function spawnSaltParticles() {
+            while (saltParticlesGroup.children.length > 0) {
+                saltParticlesGroup.remove(saltParticlesGroup.children[0]);
+            }
+
+            const particleCount = 40;
+            const geo = new THREE.SphereGeometry(0.04, 8, 8);
+            const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 });
+
+            for (let i = 0; i < particleCount; i++) {
+                const particle = new THREE.Mesh(geo, mat);
+                particle.position.set(
+                    (Math.random() - 0.5) * (BEAKER_RADIUS * 1.5),
+                    WATER_SURFACE_Y - Math.random() * (WATER_HEIGHT * 0.8),
+                    (Math.random() - 0.5) * (BEAKER_RADIUS * 1.5)
+                );
+                saltParticlesGroup.add(particle);
+            }
+
+            setTimeout(() => {
+                let fadeInterval = setInterval(() => {
+                    saltParticlesGroup.children.forEach(p => {
+                        if (p.material.opacity > 0) p.material.opacity -= 0.05;
+                    });
+                    if (saltParticlesGroup.children.length > 0 && saltParticlesGroup.children[0].material.opacity <= 0) {
+                        clearInterval(fadeInterval);
+                        while (saltParticlesGroup.children.length > 0) {
+                            saltParticlesGroup.remove(saltParticlesGroup.children[0]);
+                        }
+                    }
+                }, 50);
+            }, 600);
+        }
+
+        function updateTelemetryUI() {
+            const statusText = document.getElementById('status-display');
+            const weightText = document.getElementById('weight-force-display');
+            const buoyantText = document.getElementById('buoyant-force-display');
+
+            const weightForce = (EGG_MASS * GRAVITY).toFixed(2);
+            weightText.innerText = `${weightForce} N`;
+            buoyantText.innerText = `${currentBuoyancyForce.toFixed(2)} N`;
+
+            const eggPos = eggBody.position;
+            const distFromCenter = Math.sqrt(eggPos.x * eggPos.x + eggPos.z * eggPos.z);
+            const insideBeaker = distFromCenter < (BEAKER_RADIUS - 0.1) && eggPos.y < WATER_SURFACE_Y + 1.0;
+
+            if (isDragging) {
+                statusText.innerText = 'Agarrado por el Cursor';
+                statusText.className = 'text-xs font-bold text-cyan-300 bg-cyan-950/60 border border-cyan-500/40 px-2.5 py-1 rounded-lg';
+            } else if (!insideBeaker) {
+                statusText.innerText = 'En la Mesa';
+                statusText.className = 'text-xs font-bold text-amber-300 bg-amber-950/60 border border-amber-500/40 px-2.5 py-1 rounded-lg';
+            } else {
+                if (waterDensity < EGG_DENSITY - 5) {
+                    statusText.innerText = 'Se Hunde (Agua Dulce)';
+                    statusText.className = 'text-xs font-bold text-rose-300 bg-rose-950/60 border border-rose-500/40 px-2.5 py-1 rounded-lg';
+                } else if (waterDensity <= EGG_DENSITY + 5) {
+                    statusText.innerText = 'Flotación Neutra';
+                    statusText.className = 'text-xs font-bold text-amber-300 bg-amber-950/60 border border-amber-500/30 px-2.5 py-1 rounded-lg';
+                } else {
+                    statusText.innerText = '¡Flota en la Superficie!';
+                    statusText.className = 'text-xs font-bold text-emerald-300 bg-emerald-950/60 border border-emerald-500/40 px-2.5 py-1 rounded-lg';
+                }
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        const clock = new THREE.Clock();
+
+        function renderLoop() {
+            requestAnimationFrame(renderLoop);
+
+            const delta = Math.min(clock.getDelta(), 0.1);
+
+            world.step(1 / 60, delta, 3);
+            calculateAndApplyHydrodynamics();
+
+            eggMesh.position.copy(eggBody.position);
+            eggMesh.quaternion.copy(eggBody.quaternion);
+
+            waterMesh.rotation.y += 0.0008;
+
+            updateTelemetryUI();
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.onload = () => {
+            initScene();
+            initPhysicsWorld();
+            build3DObjects();
+            setupPointerControls();
+            setupUIEventListeners();
+            renderLoop();
+        };
+    </script>
+</body>
+</html>
