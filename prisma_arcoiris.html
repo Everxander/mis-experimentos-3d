@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Laboratorio 3D: Dispersión de Luz en Prisma</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Three.js Visual Engine -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- OrbitControls -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+            background-color: #030712;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+            touch-action: none;
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+    </style>
+</head>
+<body class="text-slate-100">
+
+    <div id="canvas-container"></div>
+
+    <!-- HUD Overlay -->
+    <div class="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 sm:p-6">
+        
+        <!-- Header -->
+        <div class="flex flex-wrap justify-between items-start gap-4">
+            <div class="glass-panel p-4 rounded-2xl pointer-events-auto max-w-xs sm:max-w-sm shadow-2xl">
+                <div class="flex items-center gap-3">
+                    <div class="p-3 bg-indigo-500/20 border border-indigo-500/40 rounded-xl text-indigo-400">
+                        <i class="fa-solid fa-triangle-exclamation text-2xl rotate-180"></i>
+                    </div>
+                    <div>
+                        <h1 class="font-bold text-base sm:text-lg leading-tight text-white">Refracción en Prisma</h1>
+                        <p class="text-xs text-slate-300">Dispersión de Luz Blanca</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Indicadores de Espectro Visible -->
+            <div class="glass-panel p-4 rounded-2xl pointer-events-auto hidden sm:flex items-center gap-2 shadow-2xl">
+                <span class="text-xs font-semibold text-slate-300 mr-2">Espectro:</span>
+                <div class="w-4 h-4 rounded-full bg-red-500 shadow-lg shadow-red-500/50" title="Rojo"></div>
+                <div class="w-4 h-4 rounded-full bg-orange-500 shadow-lg shadow-orange-500/50" title="Naranja"></div>
+                <div class="w-4 h-4 rounded-full bg-yellow-400 shadow-lg shadow-yellow-400/50" title="Amarillo"></div>
+                <div class="w-4 h-4 rounded-full bg-green-500 shadow-lg shadow-green-500/50" title="Verde"></div>
+                <div class="w-4 h-4 rounded-full bg-cyan-400 shadow-lg shadow-cyan-400/50" title="Cian"></div>
+                <div class="w-4 h-4 rounded-full bg-blue-600 shadow-lg shadow-blue-600/50" title="Azul"></div>
+                <div class="w-4 h-4 rounded-full bg-purple-600 shadow-lg shadow-purple-600/50" title="Violeta"></div>
+            </div>
+        </div>
+
+        <!-- Controles e Instrucciones -->
+        <div class="flex justify-between items-end">
+            <div class="glass-panel p-4 rounded-2xl pointer-events-auto max-w-xs shadow-2xl">
+                <p class="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-2">Pasos del Experimento</p>
+                <p class="text-xs font-mono text-slate-300 leading-relaxed">
+                    1. Enciende la lámpara para ver avanzar el haz.<br>
+                    2. Acerca o aleja la linterna para cambiar la dispersión.<br>
+                    3. Observa cómo el arcoíris se ensancha o concentra.<br>
+                    4. Apaga la luz cuando desees reiniciar.
+                </p>
+            </div>
+
+            <div class="glass-panel p-5 rounded-2xl pointer-events-auto w-full md:w-80 shadow-2xl space-y-4">
+                <button id="btn-toggle-light" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 rounded-xl text-xs transition active:scale-95 shadow-lg flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-power-off"></i> <span id="lbl-light-status">Encender Luz</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let scene, camera, renderer, controls;
+        let flashlightGroup, incidentConeMesh, rainbowBeamMesh, screenSpectrumMesh;
+        let isLightOn = false, isDraggingLamp = false;
+        let lightProgress = 0.0;
+        let raycaster, mouse, dragPlane;
+
+        const PRISM_POS = new THREE.Vector3(0, 0, 0);
+        const SCREEN_POS = new THREE.Vector3(6, 0, 0);
+
+        function createRainbowTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+
+            const gradient = ctx.createLinearGradient(0, 0, 0, 64);
+            gradient.addColorStop(0.0, '#ef4444'); // Rojo
+            gradient.addColorStop(0.16, '#f97316'); // Naranja
+            gradient.addColorStop(0.33, '#eab308'); // Amarillo
+            gradient.addColorStop(0.50, '#22c55e'); // Verde
+            gradient.addColorStop(0.66, '#06b6d4'); // Cian
+            gradient.addColorStop(0.83, '#3b82f6'); // Azul
+            gradient.addColorStop(1.0, '#a855f7'); // Violeta
+
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 512, 64);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.needsUpdate = true;
+            return texture;
+        }
+
+        function initScene() {
+            const container = document.getElementById('canvas-container');
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x030712);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 7, 13);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            container.appendChild(renderer.domElement);
+
+            const ControlsConstructor = window.OrbitControls || THREE.OrbitControls;
+            if (ControlsConstructor) {
+                controls = new ControlsConstructor(camera, renderer.domElement);
+                controls.enableDamping = true;
+                controls.dampingFactor = 0.05;
+            }
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+            dirLight.position.set(5, 10, 5);
+            scene.add(dirLight);
+
+            const planeGeo = new THREE.PlaneGeometry(200, 200);
+            const planeMat = new THREE.MeshBasicMaterial({ visible: false });
+            dragPlane = new THREE.Mesh(planeGeo, planeMat);
+            dragPlane.rotation.x = -Math.PI / 2;
+            scene.add(dragPlane);
+
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            buildEnvironment();
+            buildPrism();
+            buildLightEmitter();
+            buildLightBeams();
+            setupControls();
+
+            flashlightGroup.lookAt(PRISM_POS.x, 0.0, 0.0);
+            updateOptics();
+        }
+
+        function buildEnvironment() {
+            const tableGeo = new THREE.CylinderGeometry(10, 10, 0.4, 64);
+            const tableMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.6 });
+            const tableMesh = new THREE.Mesh(tableGeo, tableMat);
+            tableMesh.position.y = -1.5;
+            scene.add(tableMesh);
+
+            const screenGeo = new THREE.BoxGeometry(0.2, 4, 6);
+            const screenMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.9 });
+            const screenMesh = new THREE.Mesh(screenGeo, screenMat);
+            screenMesh.position.copy(SCREEN_POS);
+            scene.add(screenMesh);
+        }
+
+        function buildPrism() {
+            const shape = new THREE.Shape();
+            const size = 1.8;
+            shape.moveTo(0, size);
+            shape.lineTo(-size, -size);
+            shape.lineTo(size, -size);
+            shape.closePath();
+
+            const extrudeSettings = { depth: 2.5, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.05, bevelThickness: 0.05 };
+            const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+            geometry.center();
+
+            const glassMaterial = new THREE.MeshPhysicalMaterial({
+                color: 0xffffff,
+                transparent: true,
+                opacity: 0.45,
+                roughness: 0.1,
+                transmission: 0.9,
+                ior: 1.5,
+                reflectivity: 0.9,
+                side: THREE.DoubleSide
+            });
+
+            const prism = new THREE.Mesh(geometry, glassMaterial);
+            prism.position.copy(PRISM_POS);
+            scene.add(prism);
+        }
+
+        function buildLightEmitter() {
+            flashlightGroup = new THREE.Group();
+
+            const bodyGeo = new THREE.CylinderGeometry(0.35, 0.45, 2, 24);
+            bodyGeo.rotateX(Math.PI / 2);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.9, roughness: 0.2 });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+
+            const lensGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.1, 24);
+            lensGeo.rotateX(Math.PI / 2);
+            const lensMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            const lens = new THREE.Mesh(lensGeo, lensMat);
+            lens.position.z = 1.0;
+
+            flashlightGroup.add(body);
+            flashlightGroup.add(lens);
+            flashlightGroup.position.set(-6, 0.0, 0);
+            scene.add(flashlightGroup);
+        }
+
+        function buildLightBeams() {
+            // Cono de luz blanca
+            const coneGeo = new THREE.ConeGeometry(0.8, 1, 32, 1, true);
+            coneGeo.rotateX(-Math.PI / 2);
+            coneGeo.translate(0, 0, 0.5);
+
+            const coneMat = new THREE.MeshBasicMaterial({
+                color: 0xffffff,
+                transparent: true,
+                opacity: 0.35,
+                side: THREE.DoubleSide,
+                depthWrite: false
+            });
+            incidentConeMesh = new THREE.Mesh(coneGeo, coneMat);
+            incidentConeMesh.visible = false;
+            scene.add(incidentConeMesh);
+
+            // Haz volumétrico de Arcoíris
+            const rainbowGeo = new THREE.CylinderGeometry(0.05, 1.3, 1, 32, 1, true);
+            rainbowGeo.rotateX(-Math.PI / 2);
+            rainbowGeo.translate(0, 0, 0.5);
+
+            const rainbowTex = createRainbowTexture();
+            const rainbowMat = new THREE.MeshBasicMaterial({
+                map: rainbowTex,
+                transparent: true,
+                opacity: 0.85,
+                side: THREE.DoubleSide,
+                depthWrite: false
+            });
+
+            rainbowBeamMesh = new THREE.Mesh(rainbowGeo, rainbowMat);
+            rainbowBeamMesh.visible = false;
+            scene.add(rainbowBeamMesh);
+
+            // Proyección sobre la pantalla
+            const spotGeo = new THREE.PlaneGeometry(0.1, 3.2);
+            spotGeo.rotateY(-Math.PI / 2);
+            const spotMat = new THREE.MeshBasicMaterial({
+                map: rainbowTex,
+                transparent: true,
+                opacity: 0.9,
+                side: THREE.DoubleSide
+            });
+            screenSpectrumMesh = new THREE.Mesh(spotGeo, spotMat);
+            screenSpectrumMesh.visible = false;
+            scene.add(screenSpectrumMesh);
+        }
+
+        function updateOptics() {
+            if (!isLightOn && lightProgress <= 0) {
+                incidentConeMesh.visible = false;
+                rainbowBeamMesh.visible = false;
+                screenSpectrumMesh.visible = false;
+                return;
+            }
+
+            if (isLightOn && lightProgress < 1.0) {
+                lightProgress = Math.min(1.0, lightProgress + 0.04);
+            } else if (!isLightOn && lightProgress > 0) {
+                lightProgress = Math.max(0.0, lightProgress - 0.06);
+            }
+
+            incidentConeMesh.visible = lightProgress > 0;
+
+            const lampPos = flashlightGroup.position.clone();
+            const forwardDir = new THREE.Vector3(0, 0, 1).applyQuaternion(flashlightGroup.quaternion).normalize();
+            const lensPos = lampPos.clone().add(forwardDir.clone().multiplyScalar(1.0));
+
+            const prismImpactPoint = PRISM_POS.clone().add(new THREE.Vector3(-0.9, 0, lampPos.z * 0.4));
+            const totalDist = lensPos.distanceTo(prismImpactPoint);
+            const currentBeamDist = totalDist * Math.min(1.0, lightProgress * 1.2);
+
+            // --- EFECTO DINÁMICO SEGÚN LA DISTANCIA DE LA LÁMPARA ---
+            // Distancia normalizada (entre 2.0 y 8.0 unidades de distancia al prisma)
+            const distFactor = THREE.MathUtils.clamp((totalDist - 2.0) / 6.0, 0.2, 1.3);
+
+            // 1. Escalar cono de luz blanca (más estrecho y brillante si está cerca, más ancho si está lejos)
+            const whiteConeWidth = 0.4 + (distFactor * 0.7);
+            incidentConeMesh.position.copy(lensPos);
+            incidentConeMesh.scale.set(whiteConeWidth, whiteConeWidth, currentBeamDist);
+            incidentConeMesh.lookAt(prismImpactPoint);
+
+            if (lightProgress > 0.7) {
+                rainbowBeamMesh.visible = true;
+                screenSpectrumMesh.visible = true;
+
+                const rainbowProgress = (lightProgress - 0.7) / 0.3;
+                const prismExitPoint = PRISM_POS.clone().add(new THREE.Vector3(0.9, 0, lampPos.z * 0.4));
+                const screenX = SCREEN_POS.x - 0.1;
+
+                const centerTargetZ = lampPos.z * 0.6;
+                const screenTarget = new THREE.Vector3(screenX, 0, centerTargetZ);
+                const beamLength = prismExitPoint.distanceTo(screenTarget);
+
+                // 2. Escalar dispersión del arcoíris (al alejar la lámpara el abanico en la pantalla se ensancha)
+                const rainbowSpreadScale = 0.5 + (distFactor * 0.8);
+
+                rainbowBeamMesh.position.copy(prismExitPoint);
+                rainbowBeamMesh.scale.set(rainbowSpreadScale, rainbowSpreadScale, beamLength * rainbowProgress);
+                rainbowBeamMesh.lookAt(screenTarget);
+
+                screenSpectrumMesh.position.copy(screenTarget);
+                screenSpectrumMesh.scale.set(1, rainbowSpreadScale * rainbowProgress, 1);
+            } else {
+                rainbowBeamMesh.visible = false;
+                screenSpectrumMesh.visible = false;
+            }
+        }
+
+        function setupControls() {
+            const btnToggle = document.getElementById('btn-toggle-light');
+            const lblStatus = document.getElementById('lbl-light-status');
+
+            btnToggle.onclick = () => {
+                isLightOn = !isLightOn;
+                lblStatus.textContent = isLightOn ? 'Apagar Luz' : 'Encender Luz';
+                btnToggle.classList.toggle('bg-indigo-600', isLightOn);
+                btnToggle.classList.toggle('bg-slate-700', !isLightOn);
+            };
+
+            const canvas = renderer.domElement;
+
+            function updatePointer(e) {
+                const rect = canvas.getBoundingClientRect();
+                mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            }
+
+            canvas.addEventListener('pointerdown', (e) => {
+                updatePointer(e);
+                raycaster.setFromCamera(mouse, camera);
+
+                const hits = raycaster.intersectObjects(flashlightGroup.children, true);
+                if (hits.length > 0) {
+                    isDraggingLamp = true;
+                    if (controls) controls.enabled = false;
+                }
+            });
+
+            canvas.addEventListener('pointermove', (e) => {
+                if (!isDraggingLamp) return;
+                updatePointer(e);
+                raycaster.setFromCamera(mouse, camera);
+
+                const hits = raycaster.intersectObject(dragPlane);
+                if (hits.length > 0) {
+                    const target = hits[0].point;
+                    
+                    flashlightGroup.position.set(
+                        Math.max(-8, Math.min(-2.2, target.x)),
+                        0.0,
+                        Math.max(-4, Math.min(4, target.z))
+                    );
+
+                    flashlightGroup.lookAt(PRISM_POS.x, 0.0, flashlightGroup.position.z * 0.4);
+                }
+            });
+
+            const release = () => {
+                if (isDraggingLamp) {
+                    isDraggingLamp = false;
+                    if (controls) controls.enabled = true;
+                }
+            };
+
+            canvas.addEventListener('pointerup', release);
+            canvas.addEventListener('pointercancel', release);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function renderLoop() {
+            requestAnimationFrame(renderLoop);
+            updateOptics();
+            if (controls) controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.onload = () => {
+            initScene();
+            window.addEventListener('resize', onWindowResize);
+            renderLoop();
+        };
+    </script>
+</body>
+</html>
