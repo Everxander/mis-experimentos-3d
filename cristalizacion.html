@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Laboratorio 3D: Cristalización por Sobresaturación</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Three.js Engine -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- OrbitControls -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+            background-color: #030712;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+            touch-action: none;
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+    </style>
+</head>
+<body class="text-slate-100">
+
+    <div id="canvas-container"></div>
+
+    <!-- HUD Overlay -->
+    <div class="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 sm:p-6">
+        
+        <!-- Header -->
+        <div class="flex flex-wrap justify-between items-start gap-4">
+            <div class="glass-panel p-4 rounded-2xl pointer-events-auto max-w-xs sm:max-w-sm shadow-2xl">
+                <div class="flex items-center gap-3">
+                    <div class="p-3 bg-cyan-500/20 border border-cyan-500/40 rounded-xl text-cyan-400">
+                        <i class="fa-solid fa-gem text-2xl"></i>
+                    </div>
+                    <div>
+                        <h1 class="font-bold text-base sm:text-lg leading-tight text-white">Cristalización 3D</h1>
+                        <p class="text-xs text-slate-300">Sobresaturación y Precipitación</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Estado, Porcentaje (%) por Etapa y Temporizador -->
+            <div class="glass-panel p-3 px-5 rounded-2xl pointer-events-auto flex items-center gap-3 shadow-2xl">
+                <span class="text-xs font-semibold text-slate-300">Estado:</span>
+                <span id="lbl-status" class="text-xs font-bold px-3 py-1 rounded-full bg-slate-800 text-cyan-400 border border-cyan-500/30">
+                    1. Mantén el frasco inclinado sobre el vaso
+                </span>
+                <span id="stage-badge" class="text-xs font-bold px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                    <span id="lbl-stage-name">Saturación Vaso</span>: <span id="progress-val">0</span>%
+                </span>
+                <span id="timer-badge" class="hidden text-xs font-black px-3 py-1 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40 animate-pulse">
+                    <i class="fa-solid fa-stopwatch mr-1"></i> <span id="timer-val">5</span>s
+                </span>
+            </div>
+        </div>
+
+        <!-- Controles e Instrucciones -->
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-3">
+            
+            <!-- Panel Desplegable de Instrucciones -->
+            <div class="glass-panel rounded-2xl pointer-events-auto w-full sm:w-auto sm:max-w-xs shadow-2xl overflow-hidden transition-all duration-300">
+                <button id="btn-toggle-instructions" class="w-full p-4 flex items-center justify-between gap-3 text-left hover:bg-slate-800/40 transition">
+                    <span class="text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-2">
+                        <i class="fa-solid fa-hand-pointer"></i> Guía del Experimento
+                    </span>
+                    <i id="icon-chevron" class="fa-solid fa-chevron-up text-xs text-slate-400 transition-transform duration-300"></i>
+                </button>
+                
+                <div id="instructions-content" class="px-4 pb-4 transition-all duration-300">
+                    <p class="text-xs font-mono text-slate-300 leading-relaxed">
+                        1. Llena el vaso vertiendo soluto (0% a 100%).<br>
+                        2. Arrastra el vaso al embudo para filtrar (0% a 100%).<br>
+                        3. Suelta el soporte grueso DENTRO del matraz.<br>
+                        4. Espera 5s y cristaliza la mezcla (0% a 100%).
+                    </p>
+                </div>
+            </div>
+
+            <!-- Panel de Control -->
+            <div class="glass-panel p-4 sm:p-5 rounded-2xl pointer-events-auto w-full sm:w-80 shadow-2xl space-y-3">
+                <button id="btn-crystallize" disabled class="w-full bg-slate-800/80 text-slate-500 font-semibold py-3 rounded-xl text-xs transition shadow-lg flex items-center justify-center gap-2 cursor-not-allowed border border-slate-700/50">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> <span id="lbl-btn-crys">Soporte no colocado</span>
+                </button>
+                <button id="btn-reset" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2 rounded-xl text-xs transition flex items-center justify-center gap-2 border border-slate-700">
+                    <i class="fa-solid fa-rotate-left"></i> Reiniciar Experimento
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let scene, camera, renderer, controls;
+        let raycaster, mouse, dragPlane;
+        let draggedObject = null;
+
+        let jarGroup, beakerGroup, supportGroup;
+        let liquidMesh, sedimentMesh, funnelLiquidMesh, filterLiquidMesh;
+        let pourStreamMesh, filterDripMesh, particleSystem;
+        let crystalsGroup;
+
+        let step1Percent = 0;
+        let step2Percent = 0;
+        let step3Percent = 0;
+
+        let pouringInterval = null;
+        let isFilteringAnimRunning = false;
+        let isFiltered = false;
+        let isThreadInFlask = false;
+        let timerRunning = false;
+
+        const JAR_INIT_POS = new THREE.Vector3(-4.5, 0.0, 0);
+        const BEAKER_INIT_POS = new THREE.Vector3(-1.8, -0.3, 0);
+        const FUNNEL_POS = new THREE.Vector3(2.2, 1.2, 0);
+        const FLASK_POS = new THREE.Vector3(2.2, -0.3, 0);
+        const SUPPORT_INIT_POS = new THREE.Vector3(-4.5, 2.5, 0);
+
+        function updateStageUI(stageName, percentVal) {
+            document.getElementById('lbl-stage-name').textContent = stageName;
+            document.getElementById('progress-val').textContent = Math.round(percentVal);
+        }
+
+        function initScene() {
+            const container = document.getElementById('canvas-container');
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x030712);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 6, 12);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            container.appendChild(renderer.domElement);
+
+            const ControlsConstructor = window.OrbitControls || THREE.OrbitControls;
+            if (ControlsConstructor) {
+                controls = new ControlsConstructor(camera, renderer.domElement);
+                controls.enableDamping = true;
+                controls.dampingFactor = 0.05;
+                controls.enableRotate = true;
+                controls.target.set(0, 0, 0);
+            }
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
+            dirLight.position.set(5, 10, 5);
+            scene.add(dirLight);
+
+            // Plano de arrastre fijo en Y = 0
+            const planeGeo = new THREE.PlaneGeometry(200, 200);
+            const planeMat = new THREE.MeshBasicMaterial({ visible: false });
+            dragPlane = new THREE.Mesh(planeGeo, planeMat);
+            dragPlane.rotation.x = -Math.PI / 2;
+            scene.add(dragPlane);
+
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            buildLabEnvironment();
+            setupParticleSystem();
+            setupControls();
+        }
+
+        function buildLabEnvironment() {
+            const tableGeo = new THREE.CylinderGeometry(10, 10, 0.4, 64);
+            const tableMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.6 });
+            const tableMesh = new THREE.Mesh(tableGeo, tableMat);
+            tableMesh.position.y = -1.5;
+            scene.add(tableMesh);
+
+            const glassMat = new THREE.MeshPhysicalMaterial({
+                color: 0xffffff, transparent: true, opacity: 0.35, roughness: 0.1, transmission: 0.9, ior: 1.4, side: THREE.DoubleSide
+            });
+
+            // 1. Frasco de Soluto
+            jarGroup = new THREE.Group();
+            const jarBody = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 1.4, 24), new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.3 }));
+            const jarCap = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.3, 24), new THREE.MeshStandardMaterial({ color: 0x0284c7 }));
+            jarCap.position.y = 0.85;
+            jarGroup.add(jarBody, jarCap);
+            jarGroup.position.copy(JAR_INIT_POS);
+            jarGroup.userData = { isDraggable: true, type: 'jar' };
+            scene.add(jarGroup);
+
+            // 2. Vaso de Precipitados (Beaker)
+            beakerGroup = new THREE.Group();
+            const beaker = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 2.5, 32, 1, true), glassMat);
+            const beakerBottom = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.05, 32), glassMat);
+            beakerBottom.position.y = -1.25;
+
+            const liquidGeo = new THREE.CylinderGeometry(1.15, 1.15, 1.8, 32);
+            const liquidMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, transparent: true, opacity: 0.4, roughness: 0.1 });
+            liquidMesh = new THREE.Mesh(liquidGeo, liquidMat);
+            liquidMesh.position.y = -0.3;
+
+            const sedimentGeo = new THREE.CylinderGeometry(1.1, 1.1, 0.25, 32);
+            const sedimentMat = new THREE.MeshStandardMaterial({ color: 0x0369a1, roughness: 0.8 });
+            sedimentMesh = new THREE.Mesh(sedimentGeo, sedimentMat);
+            sedimentMesh.position.y = -1.1;
+            sedimentMesh.visible = false;
+
+            beakerGroup.add(beaker, beakerBottom, liquidMesh, sedimentMesh);
+            beakerGroup.position.copy(BEAKER_INIT_POS);
+            beakerGroup.userData = { isDraggable: true, type: 'beaker' };
+            scene.add(beakerGroup);
+
+            // Chorros dinámicos
+            const streamMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, transparent: true, opacity: 0.75 });
+            const pourStreamGeo = new THREE.CylinderGeometry(0.02, 0.06, 1.0, 16);
+            pourStreamMesh = new THREE.Mesh(pourStreamGeo, streamMat);
+            pourStreamMesh.visible = false;
+            scene.add(pourStreamMesh);
+
+            const filterDripGeo = new THREE.CylinderGeometry(0.025, 0.025, 1.1, 16);
+            filterDripMesh = new THREE.Mesh(filterDripGeo, streamMat);
+            filterDripMesh.position.set(FUNNEL_POS.x, 0.35, FUNNEL_POS.z);
+            filterDripMesh.visible = false;
+            scene.add(filterDripMesh);
+
+            // 3. Montaje de Filtración (Matraz + Embudo)
+            const flask = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 1.6, 2.2, 32, 1, true), glassMat);
+            flask.position.copy(FLASK_POS);
+            scene.add(flask);
+
+            const funnelGeo = new THREE.ConeGeometry(1.0, 1.2, 32, 1, true);
+            funnelGeo.rotateX(Math.PI);
+            const funnel = new THREE.Mesh(funnelGeo, glassMat);
+            funnel.position.copy(FUNNEL_POS);
+            scene.add(funnel);
+
+            const paperGeo = new THREE.ConeGeometry(0.95, 1.1, 32, 1, true);
+            paperGeo.rotateX(Math.PI);
+            const filterPaper = new THREE.Mesh(paperGeo, new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.9, side: THREE.DoubleSide }));
+            filterPaper.position.copy(FUNNEL_POS);
+            scene.add(filterPaper);
+
+            const funnelLiquidGeo = new THREE.ConeGeometry(0.85, 0.9, 32, 1, true);
+            funnelLiquidGeo.rotateX(Math.PI);
+            funnelLiquidMesh = new THREE.Mesh(funnelLiquidGeo, liquidMat.clone());
+            funnelLiquidMesh.position.copy(FUNNEL_POS);
+            funnelLiquidMesh.scale.set(0.001, 0.001, 0.001);
+            scene.add(funnelLiquidMesh);
+
+            const filterLiquidGeo = new THREE.CylinderGeometry(0.4, 1.5, 1.2, 32);
+            filterLiquidMesh = new THREE.Mesh(filterLiquidGeo, liquidMat.clone());
+            filterLiquidMesh.position.set(FLASK_POS.x, -0.8, FLASK_POS.z);
+            filterLiquidMesh.scale.set(0.001, 0.001, 0.001);
+            scene.add(filterLiquidMesh);
+
+            // 4. Soporte con Hilo
+            supportGroup = new THREE.Group();
+            const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 2.8, 24), new THREE.MeshStandardMaterial({ color: 0x9a3412, roughness: 0.4 }));
+            stick.rotation.z = Math.PI / 2;
+
+            const thread = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.8, 16), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+            thread.position.set(0, -0.9, 0);
+
+            supportGroup.add(stick, thread);
+            supportGroup.position.copy(SUPPORT_INIT_POS);
+            supportGroup.userData = { isDraggable: true, type: 'support' };
+            scene.add(supportGroup);
+
+            // 5. Cristales Neón
+            crystalsGroup = new THREE.Group();
+
+            const neonCrystalMat = new THREE.MeshStandardMaterial({
+                color: 0x00f2ff, emissive: 0x00a2ff, emissiveIntensity: 0.85, roughness: 0.1, metalness: 0.2
+            });
+
+            const accentCrystalMat = new THREE.MeshStandardMaterial({
+                color: 0x38bdf8, emissive: 0x0284c7, emissiveIntensity: 0.65, roughness: 0.1
+            });
+
+            for (let i = 0; i < 35; i++) {
+                const mat = Math.random() > 0.3 ? neonCrystalMat : accentCrystalMat;
+                const crys = new THREE.Mesh(new THREE.OctahedronGeometry(0.18 + Math.random() * 0.14), mat);
+                crys.position.set((Math.random() - 0.5) * 0.3, -0.2 - Math.random() * 1.3, (Math.random() - 0.5) * 0.3);
+                crys.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+                crys.scale.set(0.001, 0.001, 0.001);
+                crystalsGroup.add(crys);
+            }
+
+            for (let i = 0; i < 20; i++) {
+                const crys = new THREE.Mesh(new THREE.DodecahedronGeometry(0.22 + Math.random() * 0.18), neonCrystalMat);
+                crys.position.set((Math.random() - 0.5) * 0.8, -1.35, (Math.random() - 0.5) * 0.8);
+                crys.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+                crys.scale.set(0.001, 0.001, 0.001);
+                crystalsGroup.add(crys);
+            }
+
+            crystalsGroup.position.set(FLASK_POS.x, 0.2, FLASK_POS.z);
+            scene.add(crystalsGroup);
+        }
+
+        function setupParticleSystem() {
+            const count = 100;
+            const geo = new THREE.BufferGeometry();
+            const pos = new Float32Array(count * 3);
+
+            for (let i = 0; i < count * 3; i++) pos[i] = 0;
+            geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+
+            const mat = new THREE.PointsMaterial({
+                color: 0x38bdf8, size: 0.12, transparent: true, opacity: 0.95
+            });
+
+            particleSystem = new THREE.Points(geo, mat);
+            particleSystem.visible = false;
+            scene.add(particleSystem);
+        }
+
+        function updateParticleStream(spoutPos, targetPos) {
+            particleSystem.visible = true;
+            const posAttr = particleSystem.geometry.attributes.position;
+            const pos = posAttr.array;
+
+            for (let i = 0; i < 100; i++) {
+                const p = Math.random();
+                pos[i * 3] = spoutPos.x + (targetPos.x - spoutPos.x) * p + (Math.random() - 0.5) * 0.05;
+                pos[i * 3 + 1] = spoutPos.y + (targetPos.y - spoutPos.y) * p;
+                pos[i * 3 + 2] = spoutPos.z + (targetPos.z - spoutPos.z) * p + (Math.random() - 0.5) * 0.05;
+            }
+            posAttr.needsUpdate = true;
+        }
+
+        function startCoolingTimer() {
+            if (timerRunning) return;
+            timerRunning = true;
+
+            const timerBadge = document.getElementById('timer-badge');
+            const timerVal = document.getElementById('timer-val');
+            const lblStatus = document.getElementById('lbl-status');
+
+            timerBadge.classList.remove('hidden');
+            let timeLeft = 5;
+            timerVal.textContent = timeLeft;
+            lblStatus.textContent = "Solución en Reposo: Enfriando...";
+
+            const countdown = setInterval(() => {
+                timeLeft--;
+                timerVal.textContent = timeLeft;
+
+                if (timeLeft <= 0) {
+                    clearInterval(countdown);
+                    timerBadge.classList.add('hidden');
+                    lblStatus.textContent = "4. Reposo completo. Haz clic en Acelerar Cristalización";
+
+                    const btnCrys = document.getElementById('btn-crystallize');
+                    btnCrys.disabled = false;
+                    btnCrys.className = "w-full bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-3 rounded-xl text-xs transition active:scale-95 shadow-lg flex items-center justify-center gap-2 cursor-pointer border border-cyan-400/40";
+                    document.getElementById('lbl-btn-crys').textContent = "Acelerar Cristalización";
+
+                    updateStageUI("Cristalización", 0);
+                }
+            }, 1000);
+        }
+
+        function runFilteringAnimation() {
+            if (isFilteringAnimRunning || isFiltered) return;
+            isFilteringAnimRunning = true;
+
+            // Congelar controles para evitar recalcular la cámara durante la animación
+            if (controls) {
+                controls.enabled = false;
+            }
+
+            const lblStatus = document.getElementById('lbl-status');
+            lblStatus.textContent = "Filtrando solución a través del papel...";
+
+            // POSICIONAR VASO FIJO JUNTO AL EMBUDO (SIN MOVER LA CÁMARA)
+            beakerGroup.position.set(FUNNEL_POS.x - 1.2, FUNNEL_POS.y + 1.2, FUNNEL_POS.z);
+            beakerGroup.rotation.set(0, 0, -Math.PI / 3.5);
+
+            pourStreamMesh.position.set(FUNNEL_POS.x - 0.6, FUNNEL_POS.y + 0.6, FUNNEL_POS.z);
+            pourStreamMesh.rotation.set(0, 0, Math.PI / 6);
+            pourStreamMesh.visible = true;
+
+            filterDripMesh.visible = true;
+
+            step2Percent = 0;
+            const animInterval = setInterval(() => {
+                step2Percent += 2;
+                updateStageUI("Filtración Matraz", step2Percent);
+
+                const progressNorm = step2Percent / 100;
+
+                const remainingVol = Math.max(0.01, 1.0 - progressNorm);
+                liquidMesh.scale.set(remainingVol, remainingVol, remainingVol);
+
+                const funnelVol = Math.sin(progressNorm * Math.PI) * 0.8;
+                funnelLiquidMesh.scale.set(funnelVol, funnelVol, funnelVol);
+
+                filterLiquidMesh.scale.set(progressNorm, progressNorm, progressNorm);
+
+                if (step2Percent >= 100) {
+                    clearInterval(animInterval);
+                    isFilteringAnimRunning = false;
+                    isFiltered = true;
+
+                    pourStreamMesh.visible = false;
+                    filterDripMesh.visible = false;
+                    funnelLiquidMesh.scale.set(0.001, 0.001, 0.001);
+                    sedimentMesh.visible = false;
+
+                    beakerGroup.position.copy(BEAKER_INIT_POS);
+                    beakerGroup.rotation.set(0, 0, 0);
+
+                    // Reactivar la cámara sin saltos
+                    if (controls) {
+                        controls.enabled = true;
+                    }
+
+                    updateStageUI("Filtración Matraz", 100);
+                    lblStatus.textContent = "3. Solución limpia: Arrastra la varilla DENTRO del matraz";
+                }
+            }, 50);
+        }
+
+        function setupControls() {
+            const canvas = renderer.domElement;
+            const lblStatus = document.getElementById('lbl-status');
+
+            function updatePointer(e) {
+                const rect = canvas.getBoundingClientRect();
+                mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            }
+
+            canvas.addEventListener('pointerdown', (e) => {
+                if (isFilteringAnimRunning) return;
+                updatePointer(e);
+                raycaster.setFromCamera(mouse, camera);
+
+                const draggables = [jarGroup, beakerGroup, supportGroup];
+                const intersects = raycaster.intersectObjects(draggables.flatMap(g => g.children), true);
+
+                if (intersects.length > 0) {
+                    let obj = intersects[0].object;
+                    while (obj.parent && !obj.userData.isDraggable) {
+                        obj = obj.parent;
+                    }
+
+                    if (obj.userData.isDraggable && !(obj.userData.type === 'support' && isThreadInFlask)) {
+                        draggedObject = obj;
+                        if (controls) controls.enabled = false;
+                    }
+                }
+            });
+
+            canvas.addEventListener('pointermove', (e) => {
+                if (!draggedObject || isFilteringAnimRunning) return;
+                updatePointer(e);
+                raycaster.setFromCamera(mouse, camera);
+
+                const hits = raycaster.intersectObject(dragPlane);
+                if (hits.length > 0) {
+                    const pt = hits[0].point;
+
+                    // 1. Vertido continuo de soluto (Etapa 1: 0% a 100%)
+                    if (draggedObject.userData.type === 'jar') {
+                        const distToBeakerHorizontal = new THREE.Vector2(pt.x - BEAKER_INIT_POS.x, pt.z - BEAKER_INIT_POS.z).length();
+
+                        if (distToBeakerHorizontal < 2.2) {
+                            draggedObject.position.set(BEAKER_INIT_POS.x - 0.8, BEAKER_INIT_POS.y + 2.0, BEAKER_INIT_POS.z);
+                            draggedObject.rotation.z = -Math.PI / 3;
+
+                            const spoutPos = new THREE.Vector3(draggedObject.position.x + 0.35, draggedObject.position.y + 0.5, draggedObject.position.z);
+                            const targetPos = new THREE.Vector3(BEAKER_INIT_POS.x, BEAKER_INIT_POS.y + 0.8, BEAKER_INIT_POS.z);
+                            updateParticleStream(spoutPos, targetPos);
+
+                            if (!pouringInterval && step1Percent < 100) {
+                                pouringInterval = setInterval(() => {
+                                    if (step1Percent < 100) {
+                                        step1Percent += 2;
+                                        updateStageUI("Saturación Vaso", step1Percent);
+                                        liquidMesh.material.opacity = Math.min(0.95, 0.4 + (step1Percent / 100) * 0.4);
+
+                                        if (step1Percent >= 100) {
+                                            sedimentMesh.visible = true;
+                                            lblStatus.textContent = "2. Mezcla Sobresaturada (100%): Arrastra el vaso al embudo";
+                                            clearInterval(pouringInterval);
+                                            pouringInterval = null;
+                                        }
+                                    }
+                                }, 80);
+                            }
+                        } else {
+                            draggedObject.position.set(
+                                Math.max(-8, Math.min(8, pt.x)),
+                                Math.max(-1, Math.min(4, pt.y)),
+                                Math.max(-4, Math.min(4, pt.z))
+                            );
+                            draggedObject.rotation.z = 0;
+                            particleSystem.visible = false;
+                            if (pouringInterval) {
+                                clearInterval(pouringInterval);
+                                pouringInterval = null;
+                            }
+                        }
+                    } else {
+                        draggedObject.position.set(
+                            Math.max(-8, Math.min(8, pt.x)),
+                            Math.max(-1, Math.min(4, pt.y)),
+                            Math.max(-4, Math.min(4, pt.z))
+                        );
+                    }
+
+                    // 2. Activación de Filtración
+                    if (draggedObject.userData.type === 'beaker' && step1Percent >= 100 && !isFiltered) {
+                        const distToFunnel = draggedObject.position.distanceTo(FUNNEL_POS);
+                        if (distToFunnel < 2.5) {
+                            runFilteringAnimation();
+                            draggedObject = null;
+                            return;
+                        }
+                    }
+                }
+            });
+
+            const release = () => {
+                if (draggedObject) {
+                    if (draggedObject.userData.type === 'jar') {
+                        draggedObject.position.copy(JAR_INIT_POS);
+                        draggedObject.rotation.z = 0;
+                        particleSystem.visible = false;
+                        if (pouringInterval) {
+                            clearInterval(pouringInterval);
+                            pouringInterval = null;
+                        }
+                    }
+                    if (draggedObject.userData.type === 'beaker' && !isFilteringAnimRunning) {
+                        draggedObject.position.copy(BEAKER_INIT_POS);
+                        draggedObject.rotation.set(0, 0, 0);
+                    }
+
+                    // 3. Fijar soporte SOLO al soltar el clic sobre el matraz
+                    if (draggedObject.userData.type === 'support' && isFiltered && !isThreadInFlask) {
+                        const distToFlask = draggedObject.position.distanceTo(FLASK_POS);
+                        if (distToFlask < 2.2) {
+                            isThreadInFlask = true;
+                            supportGroup.position.set(FLASK_POS.x, 0.8, FLASK_POS.z);
+                            startCoolingTimer();
+                        } else {
+                            supportGroup.position.copy(SUPPORT_INIT_POS);
+                        }
+                    }
+
+                    draggedObject = null;
+                    if (controls) controls.enabled = true;
+                }
+            };
+
+            canvas.addEventListener('pointerup', release);
+            canvas.addEventListener('pointercancel', release);
+
+            document.getElementById('btn-crystallize').onclick = () => {
+                if (!isThreadInFlask) return;
+
+                lblStatus.textContent = "¡Sobresaturación completada! Creciendo cristales...";
+                step3Percent = 0;
+                let scaleVal = 0.001;
+                const anim = setInterval(() => {
+                    scaleVal += 0.04;
+                    crystalsGroup.children.forEach(c => c.scale.set(scaleVal, scaleVal, scaleVal));
+
+                    step3Percent = Math.min(100, Math.round(scaleVal * 100));
+                    updateStageUI("Crecimiento Cristales", step3Percent);
+
+                    if (scaleVal >= 1.0) {
+                        clearInterval(anim);
+                        updateStageUI("Experimento Completado", 100);
+                        lblStatus.textContent = "¡Cristalización Completada con Éxito!";
+                    }
+                }, 40);
+            };
+
+            document.getElementById('btn-reset').onclick = resetExperiment;
+
+            const btnInstructions = document.getElementById('btn-toggle-instructions');
+            const contentInstructions = document.getElementById('instructions-content');
+            const iconChevron = document.getElementById('icon-chevron');
+            let isInstructionsOpen = window.innerWidth >= 640;
+
+            if (!isInstructionsOpen) {
+                contentInstructions.style.display = 'none';
+                iconChevron.classList.add('rotate-180');
+            }
+
+            btnInstructions.onclick = () => {
+                isInstructionsOpen = !isInstructionsOpen;
+                contentInstructions.style.display = isInstructionsOpen ? 'block' : 'none';
+                iconChevron.classList.toggle('rotate-180', !isInstructionsOpen);
+            };
+        }
+
+        function resetExperiment() {
+            if (pouringInterval) {
+                clearInterval(pouringInterval);
+                pouringInterval = null;
+            }
+
+            step1Percent = 0;
+            step2Percent = 0;
+            step3Percent = 0;
+
+            isFilteringAnimRunning = false;
+            isFiltered = false;
+            isThreadInFlask = false;
+            timerRunning = false;
+
+            jarGroup.position.copy(JAR_INIT_POS);
+            jarGroup.rotation.z = 0;
+            beakerGroup.position.copy(BEAKER_INIT_POS);
+            beakerGroup.rotation.set(0, 0, 0);
+            supportGroup.position.copy(SUPPORT_INIT_POS);
+
+            liquidMesh.scale.set(1, 1, 1);
+            liquidMesh.material.opacity = 0.4;
+            sedimentMesh.visible = false;
+
+            funnelLiquidMesh.scale.set(0.001, 0.001, 0.001);
+            filterLiquidMesh.scale.set(0.001, 0.001, 0.001);
+            pourStreamMesh.visible = false;
+            filterDripMesh.visible = false;
+            particleSystem.visible = false;
+
+            crystalsGroup.children.forEach(c => c.scale.set(0.001, 0.001, 0.001));
+
+            if (controls) {
+                controls.enabled = true;
+                controls.target.set(0, 0, 0);
+            }
+
+            const btnCrys = document.getElementById('btn-crystallize');
+            btnCrys.disabled = true;
+            btnCrys.className = "w-full bg-slate-800/80 text-slate-500 font-semibold py-3 rounded-xl text-xs transition shadow-lg flex items-center justify-center gap-2 cursor-not-allowed border border-slate-700/50";
+            document.getElementById('lbl-btn-crys').textContent = "Soporte no colocado";
+
+            updateStageUI("Saturación Vaso", 0);
+            document.getElementById('timer-badge').classList.add('hidden');
+            document.getElementById('lbl-status').textContent = "1. Mantén el frasco inclinado sobre el vaso";
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function renderLoop() {
+            requestAnimationFrame(renderLoop);
+            if (controls) controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.onload = () => {
+            initScene();
+            window.addEventListener('resize', onWindowResize);
+            renderLoop();
+        };
+    </script>
+</body>
+</html>
