@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Laboratorio 3D: Carrera de Cubos de Hielo</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Three.js Visual Engine -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- OrbitControls -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+            background-color: #030712;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+            touch-action: none;
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+    </style>
+</head>
+<body class="text-slate-100">
+
+    <div id="canvas-container"></div>
+
+    <!-- HUD Overlay -->
+    <div class="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 sm:p-6">
+        
+        <!-- Header + Panel de Mediciones Superior -->
+        <div class="flex flex-wrap justify-between items-start gap-4">
+            <div class="glass-panel p-4 rounded-2xl pointer-events-auto max-w-xs sm:max-w-sm shadow-2xl">
+                <div class="flex items-center gap-3">
+                    <div class="p-3 bg-cyan-500/20 border border-cyan-500/40 rounded-xl text-cyan-400">
+                        <i class="fa-solid fa-icicles text-2xl"></i>
+                    </div>
+                    <div>
+                        <h1 class="font-bold text-base sm:text-lg leading-tight text-white">Carrera de Hielo</h1>
+                        <p class="text-xs text-slate-300">Termodinámica y Descenso Crioscópico</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Panel Mediciones Superior -->
+            <div class="glass-panel p-3 px-5 rounded-2xl pointer-events-auto flex justify-around items-center gap-6 shadow-2xl">
+                <div class="text-center">
+                    <span class="text-[10px] uppercase tracking-wider font-bold text-slate-400 block">Plato A</span>
+                    <span id="water-a" class="text-sm font-black text-cyan-400">0.0 ml</span>
+                    <span class="text-[9px] text-slate-500 block">22 °C</span>
+                </div>
+                <div class="h-6 w-px bg-slate-700"></div>
+                <div class="text-center">
+                    <span class="text-[10px] uppercase tracking-wider font-bold text-amber-400 block">Plato B</span>
+                    <span id="water-b" class="text-sm font-black text-amber-400">0.0 ml</span>
+                    <span id="status-b" class="text-[9px] text-slate-500 block">Sin Sal</span>
+                </div>
+                <div class="h-6 w-px bg-slate-700"></div>
+                <div class="text-center">
+                    <span class="text-[10px] uppercase tracking-wider font-bold text-rose-400 block">Plato C</span>
+                    <span id="water-c" class="text-sm font-black text-rose-400">0.0 ml</span>
+                    <span id="status-c" class="text-[9px] text-slate-500 block">Apagada</span>
+                </div>
+            </div>
+
+            <!-- Tiempo -->
+            <div class="glass-panel p-3 px-5 rounded-2xl pointer-events-auto flex items-center gap-3 shadow-2xl">
+                <span id="timer-badge" class="text-xs font-black px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 flex items-center gap-1">
+                    <i class="fa-solid fa-clock"></i> <span id="lbl-timer">0:00</span> min
+                </span>
+            </div>
+        </div>
+
+        <!-- Panel Inferior -->
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-3">
+            
+            <!-- Guía de Controles Manuales -->
+            <div class="glass-panel rounded-2xl pointer-events-auto w-full sm:w-auto sm:max-w-xs shadow-2xl overflow-hidden transition-all duration-300">
+                <button id="btn-toggle-instructions" class="w-full p-4 flex items-center justify-between gap-3 text-left hover:bg-slate-800/40 transition">
+                    <span class="text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-2">
+                        <i class="fa-solid fa-hand-pointer"></i> Controles Manuales
+                    </span>
+                    <i id="icon-chevron" class="fa-solid fa-chevron-up text-xs text-slate-400 transition-transform duration-300"></i>
+                </button>
+                
+                <div id="instructions-content" class="px-4 pb-4 transition-all duration-300">
+                    <p class="text-xs font-mono text-slate-300 leading-relaxed">
+                        1. 🧂 Arrastra el <b>salero</b> sobre el Plato B para vaciar sal.<br>
+                        2. 💡 Haz clic en la <b>lámpara</b> o en el botón para encender/apagar la luz.<br>
+                        3. 🧊 Mueve los <b>cubos de hielo</b> libremente.<br>
+                        4. Pulsa <b>Avanzar 3 Minutos</b> para medir la reacción.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Panel de Controles -->
+            <div class="glass-panel p-4 sm:p-5 rounded-2xl pointer-events-auto w-full sm:w-80 shadow-2xl space-y-3">
+                <button id="btn-toggle-lamp" class="w-full bg-amber-600 hover:bg-amber-500 text-white font-semibold py-2.5 rounded-xl text-xs transition active:scale-95 shadow-lg flex items-center justify-center gap-2 border border-amber-400/40">
+                    <i class="fa-solid fa-lightbulb"></i> <span id="lbl-lamp-status">Encender Lámpara</span>
+                </button>
+                <button id="btn-advance-time" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-3 rounded-xl text-xs transition active:scale-95 shadow-lg flex items-center justify-center gap-2 border border-cyan-400/40">
+                    <i class="fa-solid fa-forward"></i> Avanzar 3 Minutos
+                </button>
+                <button id="btn-reset" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2 rounded-xl text-xs transition flex items-center justify-center gap-2 border border-slate-700">
+                    <i class="fa-solid fa-rotate-left"></i> Reiniciar Experimento
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let scene, camera, renderer, controls;
+        let raycaster, mouse, dragPlane;
+        let draggedObject = null;
+
+        let plateA, plateB, plateC;
+        let iceA, iceB, iceC;
+        let waterA, waterB, waterC;
+        let saltShaker, saltParticlesGroup, saltAccumulatedGroup;
+        let lampGroup, lampHeadMesh, bulbMesh, spotLight, lightConeMesh;
+        let bulbOnMaterial, bulbOffMaterial;
+
+        let hasSalt = false;
+        let isLampOn = false;
+        let lightProgress = 0.0;
+        let secondsElapsed = 0;
+        let timeInterval = null;
+
+        let mlA = 0, mlB = 0, mlC = 0;
+        const ICE_SCALE_INIT = 0.85;
+
+        function createFrostedIceBumpTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = '#808080';
+            ctx.fillRect(0, 0, 512, 512);
+
+            for (let i = 0; i < 35000; i++) {
+                const val = Math.floor(Math.random() * 255);
+                ctx.fillStyle = `rgb(${val},${val},${val})`;
+                ctx.fillRect(Math.random() * 512, Math.random() * 512, 2, 2);
+            }
+
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 3;
+            for (let i = 0; i < 20; i++) {
+                ctx.beginPath();
+                ctx.moveTo(Math.random() * 512, Math.random() * 512);
+                ctx.lineTo(Math.random() * 512, Math.random() * 512);
+                ctx.stroke();
+            }
+
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        function initScene() {
+            const container = document.getElementById('canvas-container');
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x030712);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 7.5, 11.5);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.0;
+            container.appendChild(renderer.domElement);
+
+            const ControlsConstructor = window.OrbitControls || THREE.OrbitControls;
+            if (ControlsConstructor) {
+                controls = new ControlsConstructor(camera, renderer.domElement);
+                controls.enableDamping = true;
+                controls.dampingFactor = 0.05;
+                controls.enableRotate = true;
+                controls.target.set(0, 0, 0);
+            }
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(6, 12, 6);
+            scene.add(dirLight);
+
+            const planeGeo = new THREE.PlaneGeometry(200, 200);
+            const planeMat = new THREE.MeshBasicMaterial({ visible: false });
+            dragPlane = new THREE.Mesh(planeGeo, planeMat);
+            dragPlane.rotation.x = -Math.PI / 2;
+            dragPlane.position.y = 0.8;
+            scene.add(dragPlane);
+
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            saltParticlesGroup = new THREE.Group();
+            saltAccumulatedGroup = new THREE.Group();
+            scene.add(saltParticlesGroup, saltAccumulatedGroup);
+
+            buildEnvironment();
+            buildPerfectAlignedLamp();
+            setupControls();
+        }
+
+        function createCeramicPlateMesh() {
+            const group = new THREE.Group();
+
+            const baseMat = new THREE.MeshStandardMaterial({
+                color: 0x334155,
+                roughness: 0.95,
+                metalness: 0.0
+            });
+
+            const bottom = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.3, 0.12, 64), baseMat);
+            bottom.position.y = 0.06;
+
+            const rimMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.95 });
+            const rim = new THREE.Mesh(new THREE.TorusGeometry(1.48, 0.1, 16, 64), rimMat);
+            rim.rotation.x = Math.PI / 2;
+            rim.position.y = 0.12;
+
+            group.add(bottom, rim);
+            return group;
+        }
+
+        function createReflectivePuddleMesh() {
+            const shape = new THREE.Shape();
+            shape.moveTo(0, 0.75);
+            shape.bezierCurveTo(0.45, 0.85, 0.8, 0.55, 0.7, 0.2);
+            shape.bezierCurveTo(0.95, -0.2, 0.7, -0.65, 0.25, -0.75);
+            shape.bezierCurveTo(-0.25, -0.85, -0.75, -0.55, -0.65, -0.1);
+            shape.bezierCurveTo(-0.9, 0.35, -0.45, 0.65, 0, 0.75);
+
+            const extrudeSettings = { depth: 0.02, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: 0.02, bevelThickness: 0.02 };
+            const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+            geo.rotateX(-Math.PI / 2);
+
+            const waterMat = new THREE.MeshPhysicalMaterial({
+                color: 0x0284c7,
+                transparent: true,
+                opacity: 0.85,
+                roughness: 0.05,
+                clearcoat: 1.0,
+                clearcoatRoughness: 0.02,
+                reflectivity: 0.9
+            });
+
+            const mesh = new THREE.Mesh(geo, waterMat);
+            mesh.scale.set(0.01, 1, 0.01);
+            return mesh;
+        }
+
+        function createRealIceMesh() {
+            const shape = new THREE.Shape();
+            const w = 0.5, h = 0.5, r = 0.08;
+            shape.moveTo(-w + r, -h);
+            shape.lineTo(w - r, -h);
+            shape.quadraticCurveTo(w, -h, w, -h + r);
+            shape.lineTo(w, h - r);
+            shape.quadraticCurveTo(w, h, w - r, h);
+            shape.lineTo(-w + r, h);
+            shape.quadraticCurveTo(-w, h, -w, h - r);
+            shape.lineTo(-w, -h + r);
+            shape.quadraticCurveTo(-w, -h, -w + r, -h);
+
+            const extrudeSettings = { depth: 0.9, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: 0.05, bevelThickness: 0.05 };
+            const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+            geo.center();
+
+            const bumpTex = createFrostedIceBumpTexture();
+            const iceMat = new THREE.MeshStandardMaterial({
+                color: 0x7dd3fc,
+                roughness: 0.4,
+                metalness: 0.05,
+                transparent: true,
+                opacity: 0.95,
+                bumpMap: bumpTex,
+                bumpScale: 0.05
+            });
+
+            const mesh = new THREE.Mesh(geo, iceMat);
+            mesh.userData = { isDraggable: true, type: 'ice' };
+            return mesh;
+        }
+
+        function buildEnvironment() {
+            const tableMesh = new THREE.Mesh(
+                new THREE.CylinderGeometry(9, 9, 0.4, 64),
+                new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.8 })
+            );
+            tableMesh.position.y = -0.2;
+            scene.add(tableMesh);
+
+            plateA = createCeramicPlateMesh(); plateA.position.set(-3.2, 0, 0);
+            plateB = createCeramicPlateMesh(); plateB.position.set(0, 0, 0);
+            plateC = createCeramicPlateMesh(); plateC.position.set(3.2, 0, 0);
+            scene.add(plateA, plateB, plateC);
+
+            iceA = createRealIceMesh(); iceA.position.set(-3.2, 0.55, 0); iceA.scale.setScalar(ICE_SCALE_INIT);
+            iceB = createRealIceMesh(); iceB.position.set(0, 0.55, 0); iceB.scale.setScalar(ICE_SCALE_INIT);
+            iceC = createRealIceMesh(); iceC.position.set(3.2, 0.55, 0); iceC.scale.setScalar(ICE_SCALE_INIT);
+
+            scene.add(iceA, iceB, iceC);
+
+            waterA = createReflectivePuddleMesh(); waterA.position.set(-3.2, 0.13, 0);
+            waterB = createReflectivePuddleMesh(); waterB.position.set(0, 0.13, 0);
+            waterC = createReflectivePuddleMesh(); waterC.position.set(3.2, 0.13, 0);
+
+            scene.add(waterA, waterB, waterC);
+
+            saltShaker = new THREE.Group();
+            const shakerBody = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.7, 16), new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.4 }));
+            const shakerCap = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.15, 16), new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.8, roughness: 0.2 }));
+            shakerCap.position.y = 0.4;
+            saltShaker.add(shakerBody, shakerCap);
+            saltShaker.position.set(1.2, 0.6, 1.4);
+            saltShaker.userData = { isDraggable: true, type: 'saltShaker' };
+            scene.add(saltShaker);
+        }
+
+        function buildPerfectAlignedLamp() {
+            lampGroup = new THREE.Group();
+
+            const darkMetal = new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.3, metalness: 0.8 });
+            const innerWhite = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.2 });
+
+            bulbOffMaterial = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.5 });
+            
+            // Foco blanco cálido con suave matiz amarillo incandescente
+            bulbOnMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0xfffde7,
+                emissive: 0xfef08a,
+                emissiveIntensity: 1.6,
+                roughness: 0.1
+            });
+
+            // Base plana
+            const base = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.08, 32), darkMetal);
+
+            // Mástil curvo de soporte
+            const curve = new THREE.CatmullRomCurve3([
+                new THREE.Vector3(0, 0, 0),
+                new THREE.Vector3(0, 1.2, 0),
+                new THREE.Vector3(-0.6, 2.2, 0)
+            ]);
+            const stemGeo = new THREE.TubeGeometry(curve, 32, 0.04, 16, false);
+            const stem = new THREE.Mesh(stemGeo, darkMetal);
+
+            // Cúpula cónica
+            const headGroup = new THREE.Group();
+            
+            const outerGeo = new THREE.ConeGeometry(0.52, 0.7, 32, 1, true);
+            outerGeo.translate(0, -0.35, 0); 
+            const outerShade = new THREE.Mesh(outerGeo, darkMetal);
+
+            const innerGeo = new THREE.ConeGeometry(0.51, 0.69, 32, 1, true);
+            innerGeo.translate(0, -0.345, 0);
+            const innerShade = new THREE.Mesh(innerGeo, innerWhite);
+
+            // Foco/Bombilla
+            bulbMesh = new THREE.Mesh(new THREE.SphereGeometry(0.14, 16, 16), bulbOffMaterial);
+            bulbMesh.position.set(0, -0.4, 0);
+
+            headGroup.add(outerShade, innerShade, bulbMesh);
+            headGroup.position.set(-0.6, 2.2, 0);
+            headGroup.rotation.z = -0.62; 
+            headGroup.userData = { isClickable: true, type: 'lampHead' };
+
+            lampHeadMesh = headGroup;
+
+            lampGroup.add(base, stem, headGroup);
+            lampGroup.position.set(5.2, 0.1, 0.1);
+            scene.add(lampGroup);
+
+            // Emisión de luz calibrada para iluminar el cubo por completo
+            spotLight = new THREE.SpotLight(0xfde047, 0, 20, Math.PI / 2.3, 0.3);
+            
+            const bulbWorldPos = new THREE.Vector3();
+            bulbMesh.getWorldPosition(bulbWorldPos);
+            spotLight.position.copy(bulbWorldPos);
+            spotLight.target = iceC;
+
+            // Cono visual ampliado para cubrir todas las esquinas del hielo
+            const coneGeo = new THREE.ConeGeometry(2.35, 3.2, 32, 1, true);
+            coneGeo.translate(0, -1.6, 0);
+            const coneMat = new THREE.MeshBasicMaterial({
+                color: 0xfde047,
+                transparent: true,
+                opacity: 0,
+                side: THREE.DoubleSide,
+                depthWrite: false
+            });
+            lightConeMesh = new THREE.Mesh(coneGeo, coneMat);
+            lightConeMesh.position.copy(bulbWorldPos);
+            lightConeMesh.rotation.z = -0.48; 
+
+            scene.add(spotLight, lightConeMesh);
+        }
+
+        function updateLampOptics() {
+            if (isLampOn && lightProgress < 1.0) {
+                lightProgress = Math.min(1.0, lightProgress + 0.05);
+            } else if (!isLampOn && lightProgress > 0.0) {
+                lightProgress = Math.max(0.0, lightProgress - 0.08);
+            }
+
+            spotLight.intensity = lightProgress * 7.5;
+            lightConeMesh.material.opacity = lightProgress * 0.38;
+            lightConeMesh.visible = lightProgress > 0.0;
+            
+            // Foco encendido con tono blanco cálido coherente
+            bulbMesh.material = isLampOn ? bulbOnMaterial : bulbOffMaterial;
+        }
+
+        function setupControls() {
+            const btnToggleLamp = document.getElementById('btn-toggle-lamp');
+            const lblLampStatus = document.getElementById('lbl-lamp-status');
+            const statusC = document.getElementById('status-c');
+
+            function toggleLampState() {
+                isLampOn = !isLampOn;
+                lblLampStatus.textContent = isLampOn ? 'Apagar Lámpara' : 'Encender Lámpara';
+                btnToggleLamp.classList.toggle('bg-amber-600', !isLampOn);
+                btnToggleLamp.classList.toggle('bg-slate-700', isLampOn);
+
+                statusC.textContent = isLampOn ? "Lámpara Encendida (38 °C)" : "Apagada";
+                statusC.className = isLampOn ? "text-[9px] text-rose-400 font-bold block" : "text-[9px] text-slate-500 block";
+            }
+
+            btnToggleLamp.onclick = toggleLampState;
+
+            const canvas = renderer.domElement;
+
+            function updatePointer(e) {
+                const rect = canvas.getBoundingClientRect();
+                mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            }
+
+            canvas.addEventListener('pointerdown', (e) => {
+                updatePointer(e);
+                raycaster.setFromCamera(mouse, camera);
+
+                const draggables = [saltShaker, iceA, iceB, iceC, lampHeadMesh, bulbMesh];
+                const intersects = raycaster.intersectObjects(draggables.flatMap(g => g.children || g), true);
+
+                if (intersects.length > 0) {
+                    let obj = intersects[0].object;
+                    while (obj.parent && !obj.userData.isDraggable && !obj.userData.isClickable) {
+                        obj = obj.parent;
+                    }
+
+                    if (obj.userData.type === 'lampHead' || obj === bulbMesh) {
+                        toggleLampState();
+                        return;
+                    }
+
+                    if (obj.userData.isDraggable) {
+                        draggedObject = obj;
+                        if (controls) controls.enabled = false;
+                    }
+                }
+            });
+
+            canvas.addEventListener('pointermove', (e) => {
+                if (!draggedObject) return;
+                updatePointer(e);
+                raycaster.setFromCamera(mouse, camera);
+
+                const hits = raycaster.intersectObject(dragPlane);
+                if (hits.length > 0) {
+                    const pt = hits[0].point;
+
+                    draggedObject.position.set(
+                        Math.max(-5, Math.min(5, pt.x)),
+                        Math.max(0.55, Math.min(3.0, pt.y + 0.3)),
+                        Math.max(-4, Math.min(4, pt.z))
+                    );
+
+                    if (draggedObject.userData.type === 'saltShaker' && !hasSalt) {
+                        const distToPlateB = draggedObject.position.distanceTo(plateB.position);
+                        if (distToPlateB < 1.6) {
+                            hasSalt = true;
+                            draggedObject.rotation.z = Math.PI / 2.2;
+
+                            for (let i = 0; i < 150; i++) {
+                                setTimeout(() => {
+                                    const pMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+                                    const p = new THREE.Mesh(new THREE.SphereGeometry(0.024, 8, 8), pMat);
+                                    p.position.set(
+                                        draggedObject.position.x + (Math.random() - 0.5) * 0.3,
+                                        draggedObject.position.y - 0.2,
+                                        draggedObject.position.z + (Math.random() - 0.5) * 0.3
+                                    );
+                                    saltParticlesGroup.add(p);
+
+                                    const dropInterval = setInterval(() => {
+                                        p.position.y -= 0.06;
+                                        if (p.position.y <= 0.98) {
+                                            clearInterval(dropInterval);
+                                            saltParticlesGroup.remove(p);
+
+                                            for(let k = 0; k < 2; k++) {
+                                                const accP = new THREE.Mesh(new THREE.SphereGeometry(Math.random() * 0.015 + 0.02, 6, 6), pMat);
+                                                accP.position.set(
+                                                    (Math.random() - 0.5) * 0.88,
+                                                    1.0 + (Math.random() * 0.02),
+                                                    (Math.random() - 0.5) * 0.88
+                                                );
+                                                saltAccumulatedGroup.add(accP);
+                                            }
+                                        }
+                                    }, 18);
+                                }, i * 8);
+                            }
+
+                            setTimeout(() => {
+                                draggedObject.rotation.set(0, 0, 0);
+                                document.getElementById('status-b').textContent = "5g Sal Aplicada";
+                                document.getElementById('status-b').className = "text-[9px] text-amber-400 font-bold block";
+                            }, 1500);
+                        }
+                    }
+                }
+            });
+
+            const release = () => {
+                if (draggedObject) {
+                    if (draggedObject.userData.type === 'saltShaker') {
+                        draggedObject.position.set(1.2, 0.6, 1.4);
+                        draggedObject.rotation.set(0, 0, 0);
+                    }
+                    draggedObject = null;
+                }
+                if (controls) controls.enabled = true;
+            };
+
+            canvas.addEventListener('pointerup', release);
+            canvas.addEventListener('pointercancel', release);
+
+            document.getElementById('btn-advance-time').onclick = startMelting;
+            document.getElementById('btn-reset').onclick = resetExperiment;
+
+            const btnInstructions = document.getElementById('btn-toggle-instructions');
+            const contentInstructions = document.getElementById('instructions-content');
+            const iconChevron = document.getElementById('icon-chevron');
+            let isInstructionsOpen = window.innerWidth >= 640;
+
+            if (!isInstructionsOpen) {
+                contentInstructions.style.display = 'none';
+                iconChevron.classList.add('rotate-180');
+            }
+
+            btnInstructions.onclick = () => {
+                isInstructionsOpen = !isInstructionsOpen;
+                contentInstructions.style.display = isInstructionsOpen ? 'block' : 'none';
+                iconChevron.classList.toggle('rotate-180', !isInstructionsOpen);
+            };
+        }
+
+        function startMelting() {
+            if (timeInterval) return;
+
+            timeInterval = setInterval(() => {
+                secondsElapsed += 1;
+
+                const min = Math.floor(secondsElapsed / 60);
+                const sec = secondsElapsed % 60;
+                document.getElementById('lbl-timer').textContent = `${min}:${sec < 10 ? '0' : ''}${sec}`;
+
+                let rateA = 0.08;
+                let rateB = hasSalt ? 0.28 : 0.08;
+                let rateC = isLampOn ? 0.45 : 0.08;
+
+                mlA += rateA;
+                mlB += rateB;
+                mlC += rateC;
+
+                document.getElementById('water-a').textContent = `${mlA.toFixed(1)} ml`;
+                document.getElementById('water-b').textContent = `${mlB.toFixed(1)} ml`;
+                document.getElementById('water-c').textContent = `${mlC.toFixed(1)} ml`;
+
+                let factorA = Math.max(0.1, ICE_SCALE_INIT - mlA * 0.015);
+                let factorB = Math.max(0.1, ICE_SCALE_INIT - mlB * 0.015);
+                let factorC = Math.max(0.1, ICE_SCALE_INIT - mlC * 0.015);
+
+                iceA.scale.setScalar(factorA);
+                iceB.scale.setScalar(factorB);
+                iceC.scale.setScalar(factorC);
+
+                saltAccumulatedGroup.scale.set(factorB, factorB, factorB);
+                saltAccumulatedGroup.position.y = (factorB - ICE_SCALE_INIT) * 0.5;
+
+                const puddleScaleA = Math.min(1.35, mlA * 0.08);
+                const puddleScaleB = Math.min(1.35, mlB * 0.08);
+                const puddleScaleC = Math.min(1.35, mlC * 0.08);
+
+                waterA.scale.set(puddleScaleA, 1, puddleScaleA);
+                waterB.scale.set(puddleScaleB, 1, puddleScaleB);
+                waterC.scale.set(puddleScaleC, 1, puddleScaleC);
+
+                if (secondsElapsed >= 180) {
+                    clearInterval(timeInterval);
+                    timeInterval = null;
+                }
+            }, 100);
+        }
+
+        function resetExperiment() {
+            if (timeInterval) {
+                clearInterval(timeInterval);
+                timeInterval = null;
+            }
+
+            hasSalt = false;
+            isLampOn = false;
+            lightProgress = 0;
+            secondsElapsed = 0;
+            mlA = 0; mlB = 0; mlC = 0;
+
+            document.getElementById('lbl-timer').textContent = "0:00";
+            document.getElementById('water-a').textContent = "0.0 ml";
+            document.getElementById('water-b').textContent = "0.0 ml";
+            document.getElementById('water-c').textContent = "0.0 ml";
+
+            document.getElementById('status-b').textContent = "Sin Sal";
+            document.getElementById('status-b').className = "text-[9px] text-slate-500 block";
+            document.getElementById('status-c').textContent = "Apagada";
+            document.getElementById('status-c').className = "text-[9px] text-slate-500 block";
+
+            document.getElementById('lbl-lamp-status').textContent = "Encender Lámpara";
+            document.getElementById('btn-toggle-lamp').className = "w-full bg-amber-600 hover:bg-amber-500 text-white font-semibold py-2.5 rounded-xl text-xs transition active:scale-95 shadow-lg flex items-center justify-center gap-2 border border-amber-400/40";
+
+            while(saltAccumulatedGroup.children.length > 0) {
+                saltAccumulatedGroup.remove(saltAccumulatedGroup.children[0]);
+            }
+            saltAccumulatedGroup.scale.set(1, 1, 1);
+            saltAccumulatedGroup.position.set(0, 0, 0);
+
+            iceA.scale.setScalar(ICE_SCALE_INIT);
+            iceB.scale.setScalar(ICE_SCALE_INIT);
+            iceC.scale.setScalar(ICE_SCALE_INIT);
+
+            iceA.position.set(-3.2, 0.55, 0);
+            iceB.position.set(0, 0.55, 0);
+            iceC.position.set(3.2, 0.55, 0);
+
+            waterA.scale.set(0.01, 1, 0.01);
+            waterB.scale.set(0.01, 1, 0.01);
+            waterC.scale.set(0.01, 1, 0.01);
+
+            saltShaker.position.set(1.2, 0.6, 1.4);
+            saltShaker.rotation.set(0, 0, 0);
+
+            if (controls) controls.target.set(0, 0, 0);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function renderLoop() {
+            requestAnimationFrame(renderLoop);
+            updateLampOptics();
+            if (controls) controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.onload = () => {
+            initScene();
+            window.addEventListener('resize', onWindowResize);
+            renderLoop();
+        };
+    </script>
+</body>
+</html>
