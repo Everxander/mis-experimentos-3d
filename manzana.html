@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Laboratorio 3D: Escudo Antioxidante en Frutas</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Three.js Engine -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- OrbitControls -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+            background-color: #030712;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+            touch-action: none;
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+    </style>
+</head>
+<body class="text-slate-100">
+
+    <div id="canvas-container"></div>
+
+    <!-- HUD Overlay -->
+    <div class="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 sm:p-6">
+        
+        <!-- Header -->
+        <div class="flex flex-wrap justify-between items-start gap-4">
+            <div class="glass-panel p-4 rounded-2xl pointer-events-auto max-w-xs sm:max-w-sm shadow-2xl">
+                <div class="flex items-center gap-3">
+                    <div class="p-3 bg-emerald-500/20 border border-emerald-500/40 rounded-xl text-emerald-400">
+                        <i class="fa-solid fa-lemon text-2xl"></i>
+                    </div>
+                    <div>
+                        <h1 class="font-bold text-base sm:text-lg leading-tight text-white">Escudo Antioxidante</h1>
+                        <p class="text-xs text-slate-300">Oxidación Enzimática y Vitamina C</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Estado y Reloj -->
+            <div class="glass-panel p-3 px-5 rounded-2xl pointer-events-auto flex items-center gap-3 shadow-2xl">
+                <span class="text-xs font-semibold text-slate-300">Estado:</span>
+                <span id="lbl-status" class="text-xs font-bold px-3 py-1 rounded-full bg-slate-800 text-cyan-400 border border-cyan-500/30">
+                    1. Arrastra el cuchillo hacia la manzana para cortarla
+                </span>
+                <span id="timer-badge" class="text-xs font-black px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
+                    <i class="fa-solid fa-clock"></i> <span id="lbl-timer">0</span> min
+                </span>
+            </div>
+        </div>
+
+        <!-- Panel Inferior -->
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-3">
+            
+            <!-- Guía del Experimento -->
+            <div class="glass-panel rounded-2xl pointer-events-auto w-full sm:w-auto sm:max-w-xs shadow-2xl overflow-hidden transition-all duration-300">
+                <button id="btn-toggle-instructions" class="w-full p-4 flex items-center justify-between gap-3 text-left hover:bg-slate-800/40 transition">
+                    <span class="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+                        <i class="fa-solid fa-graduation-cap"></i> Guía del Experimento
+                    </span>
+                    <i id="icon-chevron" class="fa-solid fa-chevron-up text-xs text-slate-400 transition-transform duration-300"></i>
+                </button>
+                
+                <div id="instructions-content" class="px-4 pb-4 transition-all duration-300">
+                    <p class="text-xs font-mono text-slate-300 leading-relaxed">
+                        1. Usa el cuchillo para cortar la manzana por la mitad.<br>
+                        2. Corta el limón en dos mitades.<br>
+                        3. Exprime cualquiera de las dos mitades sobre la Rodaja B.<br>
+                        4. Avanza 20 minutos para observar la reacción de oxidación.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Panel de Control -->
+            <div class="glass-panel p-4 sm:p-5 rounded-2xl pointer-events-auto w-full sm:w-80 shadow-2xl space-y-3">
+                <button id="btn-advance-time" disabled class="w-full bg-slate-800/80 text-slate-500 font-semibold py-3 rounded-xl text-xs transition shadow-lg flex items-center justify-center gap-2 cursor-not-allowed border border-slate-700/50">
+                    <i class="fa-solid fa-forward"></i> <span id="lbl-btn-time">Avanzar 20 Minutos</span>
+                </button>
+                <button id="btn-reset" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2 rounded-xl text-xs transition flex items-center justify-center gap-2 border border-slate-700">
+                    <i class="fa-solid fa-rotate-left"></i> Reiniciar Experimento
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let scene, camera, renderer, controls;
+        let raycaster, mouse, dragPlane;
+        let draggedObject = null;
+
+        let fullAppleMesh, sliceA, sliceB, knifeMesh, fullLemonMesh, lemonHalfA, lemonHalfB;
+        let fleshTextureA, fleshTextureB, bumpMapTexture;
+        let canvasA, ctxA, canvasB, ctxB;
+
+        let isAppleCut = false;
+        let isLemonCut = false;
+        let hasLemonJuice = false;
+        let isAnimatingCut = false;
+        let minutesElapsed = 0;
+        let timeInterval = null;
+
+        const APPLE_INIT_POS = new THREE.Vector3(-2.2, 0.7, 0);
+        const LEMON_INIT_POS = new THREE.Vector3(2.4, 0.6, 0);
+        const KNIFE_INIT_POS = new THREE.Vector3(-4.0, 1.8, 0);
+
+        const LEMON_REST_A = new THREE.Vector3(1.9, 0.35, 0);
+        const LEMON_REST_B = new THREE.Vector3(2.9, 0.35, 0);
+
+        function createAppleFleshCanvas() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = '#fef9c3';
+            ctx.fillRect(0, 0, 512, 512);
+
+            for (let i = 0; i < 5000; i++) {
+                ctx.fillStyle = Math.random() > 0.5 ? '#fef08a' : '#fef3c7';
+                ctx.fillRect(Math.random() * 512, Math.random() * 512, 2, 2);
+            }
+
+            ctx.strokeStyle = '#dc2626';
+            ctx.lineWidth = 18;
+            ctx.beginPath(); ctx.arc(256, 256, 240, 0, Math.PI * 2); ctx.stroke();
+
+            ctx.fillStyle = '#fde047';
+            ctx.beginPath(); ctx.ellipse(256, 256, 55, 85, 0, 0, Math.PI * 2); ctx.fill();
+
+            ctx.fillStyle = '#3f1f0a';
+            ctx.beginPath(); ctx.ellipse(240, 245, 12, 20, -0.3, 0, Math.PI * 2); ctx.ellipse(272, 245, 12, 20, 0.3, 0, Math.PI * 2); ctx.fill();
+
+            return { canvas, ctx };
+        }
+
+        function createLemonFleshCanvas() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = '#fef9c3';
+            ctx.fillRect(0, 0, 512, 512);
+
+            ctx.fillStyle = '#facc15';
+            for (let i = 0; i < 10; i++) {
+                const angle = (i * Math.PI) / 5;
+                ctx.beginPath();
+                ctx.moveTo(256, 256);
+                ctx.arc(256, 256, 230, angle + 0.08, angle + (Math.PI / 5) - 0.08);
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            ctx.strokeStyle = '#fef08a';
+            ctx.lineWidth = 6;
+            for (let i = 0; i < 10; i++) {
+                const angle = (i * Math.PI) / 5;
+                ctx.beginPath();
+                ctx.moveTo(256, 256);
+                ctx.lineTo(256 + Math.cos(angle) * 230, 256 + Math.sin(angle) * 230);
+                ctx.stroke();
+            }
+
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        function createBumpTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256; canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#808080'; ctx.fillRect(0, 0, 256, 256);
+            for (let i = 0; i < 3000; i++) {
+                ctx.fillStyle = Math.random() > 0.5 ? '#ffffff' : '#000000';
+                ctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
+            }
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        function initScene() {
+            const container = document.getElementById('canvas-container');
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x030712);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 7.5, 11);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            container.appendChild(renderer.domElement);
+
+            const ControlsConstructor = window.OrbitControls || THREE.OrbitControls;
+            if (ControlsConstructor) {
+                controls = new ControlsConstructor(camera, renderer.domElement);
+                controls.enableDamping = true;
+                controls.dampingFactor = 0.05;
+                controls.enableRotate = true;
+                controls.target.set(0, 0, 0);
+            }
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            dirLight.position.set(6, 12, 6);
+            scene.add(dirLight);
+
+            const planeGeo = new THREE.PlaneGeometry(200, 200);
+            const planeMat = new THREE.MeshBasicMaterial({ visible: false });
+            dragPlane = new THREE.Mesh(planeGeo, planeMat);
+            dragPlane.rotation.x = -Math.PI / 2;
+            dragPlane.position.y = 0.8;
+            scene.add(dragPlane);
+
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            bumpMapTexture = createBumpTexture();
+            bumpMapTexture.wrapS = THREE.RepeatWrapping;
+            bumpMapTexture.wrapT = THREE.RepeatWrapping;
+            bumpMapTexture.repeat.set(4, 4);
+
+            buildEnvironment();
+            setupControls();
+        }
+
+        function buildEnvironment() {
+            // Mesa
+            const tableGeo = new THREE.CylinderGeometry(9, 9, 0.4, 64);
+            const tableMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.5 });
+            const tableMesh = new THREE.Mesh(tableGeo, tableMat);
+            tableMesh.position.y = -0.2;
+            scene.add(tableMesh);
+
+            const plateMat = new THREE.MeshPhysicalMaterial({
+                color: 0xf8fafc, roughness: 0.1, metalness: 0.05, clearcoat: 0.5, clearcoatRoughness: 0.1
+            });
+
+            // Plato Manzana
+            const plateMesh1 = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 1.7, 0.14, 48), plateMat);
+            plateMesh1.position.set(-2.2, 0.08, 0);
+            scene.add(plateMesh1);
+
+            // Plato Limón
+            const plateMesh2 = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.4, 0.14, 48), plateMat);
+            plateMesh2.position.set(2.4, 0.08, 0);
+            scene.add(plateMesh2);
+
+            // Manzana Entera
+            const appleGeo = new THREE.SphereGeometry(0.95, 32, 32);
+            appleGeo.scale(1.0, 0.95, 1.0);
+            const appleSkinMat = new THREE.MeshStandardMaterial({
+                color: 0xdc2626, roughness: 0.2, bumpMap: bumpMapTexture, bumpScale: 0.02
+            });
+            fullAppleMesh = new THREE.Group();
+            const appleBody = new THREE.Mesh(appleGeo, appleSkinMat);
+            const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 0.4, 12), new THREE.MeshStandardMaterial({ color: 0x451a03 }));
+            stem.position.y = 0.95;
+            fullAppleMesh.add(appleBody, stem);
+            fullAppleMesh.position.copy(APPLE_INIT_POS);
+            scene.add(fullAppleMesh);
+
+            // Pulpas de Manzana
+            const resA = createAppleFleshCanvas();
+            canvasA = resA.canvas; ctxA = resA.ctx;
+            fleshTextureA = new THREE.CanvasTexture(canvasA);
+
+            const resB = createAppleFleshCanvas();
+            canvasB = resB.canvas; ctxB = resB.ctx;
+            fleshTextureB = new THREE.CanvasTexture(canvasB);
+
+            const halfGeoApple = new THREE.SphereGeometry(0.95, 32, 32, 0, Math.PI);
+            halfGeoApple.scale(1.0, 0.95, 1.0);
+
+            sliceA = new THREE.Group();
+            const skinA = new THREE.Mesh(halfGeoApple, appleSkinMat);
+            skinA.rotation.y = -Math.PI / 2;
+            const fleshGeoA = new THREE.CircleGeometry(0.93, 32);
+            const fleshMatA = new THREE.MeshStandardMaterial({ map: fleshTextureA, roughness: 0.5 });
+            const fleshA = new THREE.Mesh(fleshGeoA, fleshMatA);
+            fleshA.rotation.y = Math.PI / 2;
+            sliceA.add(skinA, fleshA);
+            sliceA.position.set(-2.8, 0.55, 0);
+            sliceA.rotation.y = Math.PI / 6;
+            sliceA.visible = false;
+            scene.add(sliceA);
+
+            sliceB = new THREE.Group();
+            const skinB = new THREE.Mesh(halfGeoApple, appleSkinMat);
+            skinB.rotation.y = Math.PI / 2;
+            const fleshGeoB = new THREE.CircleGeometry(0.93, 32);
+            const fleshMatB = new THREE.MeshStandardMaterial({ map: fleshTextureB, roughness: 0.5 });
+            const fleshB = new THREE.Mesh(fleshGeoB, fleshMatB);
+            fleshB.rotation.y = -Math.PI / 2;
+            fleshB.name = "fleshB";
+            sliceB.add(skinB, fleshB);
+            sliceB.position.set(-1.5, 0.55, 0);
+            sliceB.rotation.y = -Math.PI / 6;
+            sliceB.visible = false;
+            scene.add(sliceB);
+
+            // Cuchillo HD
+            knifeMesh = new THREE.Group();
+            const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.55, 2.2), new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.98, roughness: 0.1 }));
+            const handle = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.32, 1.0), new THREE.MeshStandardMaterial({ color: 0x3f1f0a, roughness: 0.4, bumpMap: bumpMapTexture, bumpScale: 0.01 }));
+            handle.position.z = 1.4;
+
+            const rivetMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, metalness: 0.9, roughness: 0.2 });
+            const r1 = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.14, 12), rivetMat); r1.rotation.z = Math.PI / 2; r1.position.set(0, 0.05, 1.1);
+            const r2 = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.14, 12), rivetMat); r2.rotation.z = Math.PI / 2; r2.position.set(0, 0.05, 1.6);
+            knifeMesh.add(blade, handle, r1, r2);
+            knifeMesh.position.copy(KNIFE_INIT_POS);
+            knifeMesh.rotation.x = Math.PI / 6;
+            knifeMesh.userData = { isDraggable: true, type: 'knife' };
+            scene.add(knifeMesh);
+
+            // Limón Entero HD
+            fullLemonMesh = new THREE.Group();
+            const lemonGeo = new THREE.SphereGeometry(0.7, 32, 32);
+            lemonGeo.scale(1.2, 0.85, 0.85);
+            const lemonSkinMat = new THREE.MeshStandardMaterial({ color: 0xca8a04, roughness: 0.35, bumpMap: bumpMapTexture, bumpScale: 0.03 });
+            const lemonBody = new THREE.Mesh(lemonGeo, lemonSkinMat);
+            fullLemonMesh.add(lemonBody);
+            fullLemonMesh.position.copy(LEMON_INIT_POS);
+            fullLemonMesh.userData = { isDraggable: true, type: 'fullLemon' };
+            scene.add(fullLemonMesh);
+
+            // Mitades de Limón
+            const lemonFleshTex = createLemonFleshCanvas();
+            const lemonFleshMat = new THREE.MeshStandardMaterial({ map: lemonFleshTex, roughness: 0.2 });
+
+            // Mitad A (Izquierda)
+            lemonHalfA = new THREE.Group();
+            const skinMeshA = new THREE.Mesh(new THREE.SphereGeometry(0.68, 32, 32, 0, Math.PI), lemonSkinMat);
+            skinMeshA.rotation.y = -Math.PI / 2;
+            const fleshMeshA = new THREE.Mesh(new THREE.CircleGeometry(0.67, 32), lemonFleshMat);
+            fleshMeshA.rotation.y = Math.PI / 2;
+            lemonHalfA.add(skinMeshA, fleshMeshA);
+            lemonHalfA.position.copy(LEMON_REST_A);
+            lemonHalfA.rotation.x = -Math.PI / 2;
+            lemonHalfA.visible = false;
+            lemonHalfA.userData = { isDraggable: true, type: 'lemonHalf', initPos: LEMON_REST_A };
+            scene.add(lemonHalfA);
+
+            // Mitad B (Derecha) - AMBAS MITADES AHORA SON COMPLETAMENTE INTERACTIVAS
+            lemonHalfB = new THREE.Group();
+            const skinMeshB = new THREE.Mesh(new THREE.SphereGeometry(0.68, 32, 32, 0, Math.PI), lemonSkinMat);
+            skinMeshB.rotation.y = Math.PI / 2;
+            const fleshMeshB = new THREE.Mesh(new THREE.CircleGeometry(0.67, 32), lemonFleshMat);
+            fleshMeshB.rotation.y = -Math.PI / 2;
+            lemonHalfB.add(skinMeshB, fleshMeshB);
+            lemonHalfB.position.copy(LEMON_REST_B);
+            lemonHalfB.rotation.x = -Math.PI / 2;
+            lemonHalfB.visible = false;
+            lemonHalfB.userData = { isDraggable: true, type: 'lemonHalf', initPos: LEMON_REST_B };
+            scene.add(lemonHalfB);
+        }
+
+        function triggerCutAnimation(targetMesh, onComplete) {
+            isAnimatingCut = true;
+            if (controls) controls.enabled = false;
+
+            knifeMesh.position.set(targetMesh.position.x, targetMesh.position.y + 1.6, targetMesh.position.z);
+            knifeMesh.rotation.set(0, 0, 0);
+
+            let progress = 0;
+            const anim = setInterval(() => {
+                progress += 0.08;
+                knifeMesh.position.y = targetMesh.position.y + 1.6 - progress * 1.5;
+
+                if (progress >= 1.0) {
+                    clearInterval(anim);
+                    isAnimatingCut = false;
+                    knifeMesh.position.copy(KNIFE_INIT_POS);
+                    knifeMesh.rotation.x = Math.PI / 6;
+                    if (controls) controls.enabled = true;
+                    onComplete();
+                }
+            }, 30);
+        }
+
+        function animateLemonOpening() {
+            let progress = 0;
+            const startY = 0.8;
+            const endY = 0.35;
+
+            const anim = setInterval(() => {
+                progress += 0.05;
+                const currentY = startY - (startY - endY) * progress;
+                lemonHalfA.position.set(2.4 - progress * 0.5, currentY, 0);
+                lemonHalfB.position.set(2.4 + progress * 0.5, currentY, 0);
+
+                if (progress >= 1.0) {
+                    clearInterval(anim);
+                    lemonHalfA.position.copy(LEMON_REST_A);
+                    lemonHalfB.position.copy(LEMON_REST_B);
+                }
+            }, 20);
+        }
+
+        function createJuiceDrop(pos) {
+            const dropGeo = new THREE.SphereGeometry(0.08, 12, 12);
+            const dropMat = new THREE.MeshStandardMaterial({ color: 0xfef08a, transparent: true, opacity: 0.85, roughness: 0.1 });
+            const drop = new THREE.Mesh(dropGeo, dropMat);
+            drop.position.copy(pos);
+            scene.add(drop);
+
+            const anim = setInterval(() => {
+                drop.position.y -= 0.08;
+                if (drop.position.y <= 0.6) {
+                    clearInterval(anim);
+                    scene.remove(drop);
+                }
+            }, 30);
+        }
+
+        function setupControls() {
+            const canvas = renderer.domElement;
+            const lblStatus = document.getElementById('lbl-status');
+
+            function updatePointer(e) {
+                const rect = canvas.getBoundingClientRect();
+                mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            }
+
+            canvas.addEventListener('pointerdown', (e) => {
+                if (isAnimatingCut) return;
+                updatePointer(e);
+                raycaster.setFromCamera(mouse, camera);
+
+                // SE AGREGÓ lemonHalfB A LA LISTA DE ELEMENTOS ARRASTRABLES
+                const draggables = [knifeMesh, fullLemonMesh, lemonHalfA, lemonHalfB];
+                const intersects = raycaster.intersectObjects(draggables.flatMap(g => g.children || g), true);
+
+                if (intersects.length > 0) {
+                    let obj = intersects[0].object;
+                    while (obj.parent && !obj.userData.isDraggable) {
+                        obj = obj.parent;
+                    }
+
+                    if (obj.userData.isDraggable) {
+                        draggedObject = obj;
+                        if (controls) controls.enabled = false;
+                    }
+                }
+            });
+
+            canvas.addEventListener('pointermove', (e) => {
+                if (!draggedObject || isAnimatingCut) return;
+                updatePointer(e);
+                raycaster.setFromCamera(mouse, camera);
+
+                const hits = raycaster.intersectObject(dragPlane);
+                if (hits.length > 0) {
+                    const pt = hits[0].point;
+
+                    if (draggedObject.userData.type === 'lemonHalf') {
+                        draggedObject.position.set(
+                            Math.max(-5, Math.min(5, pt.x)),
+                            Math.max(1.4, Math.min(3.5, pt.y + 0.5)),
+                            Math.max(-4, Math.min(4, pt.z))
+                        );
+                    } else {
+                        draggedObject.position.set(
+                            Math.max(-5, Math.min(5, pt.x)),
+                            Math.max(0.8, Math.min(3.5, pt.y)),
+                            Math.max(-4, Math.min(4, pt.z))
+                        );
+                    }
+
+                    // A. Cortar Manzana
+                    if (draggedObject.userData.type === 'knife' && !isAppleCut) {
+                        const distToApple = draggedObject.position.distanceTo(fullAppleMesh.position);
+                        if (distToApple < 1.3) {
+                            draggedObject = null;
+                            triggerCutAnimation(fullAppleMesh, () => {
+                                isAppleCut = true;
+                                fullAppleMesh.visible = false;
+                                sliceA.visible = true;
+                                sliceB.visible = true;
+                                lblStatus.textContent = "2. Pasa el cuchillo sobre el limón para cortarlo en dos mitades";
+                            });
+                            return;
+                        }
+                    }
+
+                    // B. Cortar Limón
+                    if (draggedObject.userData.type === 'knife' && isAppleCut && !isLemonCut) {
+                        const distToLemon = draggedObject.position.distanceTo(fullLemonMesh.position);
+                        if (distToLemon < 1.3) {
+                            draggedObject = null;
+                            triggerCutAnimation(fullLemonMesh, () => {
+                                isLemonCut = true;
+                                fullLemonMesh.visible = false;
+                                lemonHalfA.visible = true;
+                                lemonHalfB.visible = true;
+                                animateLemonOpening();
+                                lblStatus.textContent = "3. Arrastra cualquiera de las mitades de limón sobre la Rodaja B";
+                            });
+                            return;
+                        }
+                    }
+
+                    // C. Exprimir Mitad de Limón (A o B) sobre Rodaja B
+                    if (draggedObject.userData.type === 'lemonHalf' && isAppleCut && isLemonCut && !hasLemonJuice) {
+                        const distToSliceB = draggedObject.position.distanceTo(sliceB.position);
+                        if (distToSliceB < 1.8) {
+                            hasLemonJuice = true;
+                            const activeLemon = draggedObject;
+                            activeLemon.rotation.z = Math.PI / 3;
+
+                            for (let i = 0; i < 5; i++) {
+                                setTimeout(() => {
+                                    createJuiceDrop(new THREE.Vector3(sliceB.position.x + (Math.random() - 0.5) * 0.3, 1.4, sliceB.position.z));
+                                }, i * 180);
+                            }
+
+                            const fleshB = sliceB.getObjectByName("fleshB");
+                            if (fleshB) fleshB.material.roughness = 0.08;
+
+                            setTimeout(() => {
+                                activeLemon.position.copy(activeLemon.userData.initPos);
+                                activeLemon.rotation.set(-Math.PI / 2, 0, 0);
+                                draggedObject = null;
+                                if (controls) controls.enabled = true;
+
+                                const btnTime = document.getElementById('btn-advance-time');
+                                btnTime.disabled = false;
+                                btnTime.className = "w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-xl text-xs transition active:scale-95 shadow-lg flex items-center justify-center gap-2 cursor-pointer border border-emerald-400/40";
+
+                                lblStatus.textContent = "4. ¡Protección con Vitamina C aplicada! Haz clic en Avanzar 20 Minutos";
+                            }, 1000);
+                        }
+                    }
+                }
+            });
+
+            const release = () => {
+                if (draggedObject && !isAnimatingCut) {
+                    if (draggedObject.userData.type === 'knife') knifeMesh.position.copy(KNIFE_INIT_POS);
+                    if (draggedObject.userData.type === 'fullLemon') fullLemonMesh.position.copy(LEMON_INIT_POS);
+                    if (draggedObject.userData.type === 'lemonHalf' && !hasLemonJuice) {
+                        draggedObject.position.copy(draggedObject.userData.initPos);
+                        draggedObject.rotation.set(-Math.PI / 2, 0, 0);
+                    }
+                    draggedObject = null;
+                }
+                if (controls && !isAnimatingCut) {
+                    controls.enabled = true;
+                }
+            };
+
+            canvas.addEventListener('pointerup', release);
+            canvas.addEventListener('pointercancel', release);
+
+            // Avanzar Tiempo
+            document.getElementById('btn-advance-time').onclick = () => {
+                if (timeInterval) return;
+
+                const lblTimer = document.getElementById('lbl-timer');
+                const lblStatus = document.getElementById('lbl-status');
+                lblStatus.textContent = "Reacción química en progreso: El oxígeno oxida la pulpa de la manzana...";
+
+                timeInterval = setInterval(() => {
+                    minutesElapsed += 1;
+                    lblTimer.textContent = minutesElapsed;
+
+                    const ratio = minutesElapsed / 20;
+
+                    ctxA.fillStyle = `rgba(120, 53, 15, ${ratio * 0.85})`;
+                    ctxA.fillRect(0, 0, 512, 512);
+
+                    ctxA.fillStyle = `rgba(67, 20, 7, ${ratio * 0.5})`;
+                    ctxA.beginPath();
+                    ctxA.arc(200, 200, 120 * ratio, 0, Math.PI * 2);
+                    ctxA.arc(320, 300, 100 * ratio, 0, Math.PI * 2);
+                    ctxA.fill();
+
+                    fleshTextureA.needsUpdate = true;
+
+                    if (minutesElapsed >= 20) {
+                        clearInterval(timeInterval);
+                        timeInterval = null;
+                        lblStatus.textContent = "¡Experimento completado! La Vitamina C del limón neutralizó los radicales libres.";
+                    }
+                }, 150);
+            };
+
+            document.getElementById('btn-reset').onclick = resetExperiment;
+
+            const btnInstructions = document.getElementById('btn-toggle-instructions');
+            const contentInstructions = document.getElementById('instructions-content');
+            const iconChevron = document.getElementById('icon-chevron');
+            let isInstructionsOpen = window.innerWidth >= 640;
+
+            if (!isInstructionsOpen) {
+                contentInstructions.style.display = 'none';
+                iconChevron.classList.add('rotate-180');
+            }
+
+            btnInstructions.onclick = () => {
+                isInstructionsOpen = !isInstructionsOpen;
+                contentInstructions.style.display = isInstructionsOpen ? 'block' : 'none';
+                iconChevron.classList.toggle('rotate-180', !isInstructionsOpen);
+            };
+        }
+
+        function resetExperiment() {
+            if (timeInterval) {
+                clearInterval(timeInterval);
+                timeInterval = null;
+            }
+
+            isAppleCut = false;
+            isLemonCut = false;
+            hasLemonJuice = false;
+            isAnimatingCut = false;
+            minutesElapsed = 0;
+
+            document.getElementById('lbl-timer').textContent = "0";
+
+            fullAppleMesh.visible = true;
+            sliceA.visible = false;
+            sliceB.visible = false;
+
+            fullLemonMesh.visible = true;
+            fullLemonMesh.position.copy(LEMON_INIT_POS);
+            lemonHalfA.visible = false;
+            lemonHalfB.visible = false;
+
+            ctxA.fillStyle = '#fef9c3'; ctxA.fillRect(0, 0, 512, 512);
+            ctxA.strokeStyle = '#dc2626'; ctxA.lineWidth = 18;
+            ctxA.beginPath(); ctxA.arc(256, 256, 240, 0, Math.PI * 2); ctxA.stroke();
+            ctxA.fillStyle = '#fde047'; ctxA.beginPath(); ctxA.ellipse(256, 256, 55, 85, 0, 0, Math.PI * 2); ctxA.fill();
+            ctxA.fillStyle = '#3f1f0a'; ctxA.beginPath(); ctxA.ellipse(240, 245, 12, 20, -0.3, 0, Math.PI * 2); ctxA.ellipse(272, 245, 12, 20, 0.3, 0, Math.PI * 2); ctxA.fill();
+            fleshTextureA.needsUpdate = true;
+
+            knifeMesh.position.copy(KNIFE_INIT_POS);
+            knifeMesh.rotation.set(Math.PI / 6, 0, 0);
+
+            const btnTime = document.getElementById('btn-advance-time');
+            btnTime.disabled = true;
+            btnTime.className = "w-full bg-slate-800/80 text-slate-500 font-semibold py-3 rounded-xl text-xs transition shadow-lg flex items-center justify-center gap-2 cursor-not-allowed border border-slate-700/50";
+
+            if (controls) {
+                controls.enabled = true;
+                controls.target.set(0, 0, 0);
+            }
+
+            document.getElementById('lbl-status').textContent = "1. Arrastra el cuchillo hacia la manzana para cortarla";
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function renderLoop() {
+            requestAnimationFrame(renderLoop);
+            if (controls) controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.onload = () => {
+            initScene();
+            window.addEventListener('resize', onWindowResize);
+            renderLoop();
+        };
+    </script>
+</body>
+</html>
